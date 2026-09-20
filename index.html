@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>无限画布 · 分镜工作流</title>
+<link rel="stylesheet" href="css/style.css?v=20260920f">
+</head>
+<body>
+<div id="app">
+
+  <!-- ========== 首页视图 ========== -->
+  <div id="home-view" class="home-view">
+    <div class="home-inner">
+      <div class="home-header">
+        <div class="home-brand">
+          <div class="home-logo">◈</div>
+          <div class="home-title-group">
+            <div class="home-title">无限画布</div>
+            <div class="home-subtitle">分镜工作流 · 画布项目管理</div>
+          </div>
+        </div>
+        <button id="home-new" class="btn primary home-new-btn"><i data-ic="plus"></i> 新建画布</button>
+      </div>
+      <div class="home-body">
+        <div id="home-canvas-list" class="home-grid"></div>
+        <div id="home-empty" class="home-empty">
+          <div class="home-empty-icon"><i data-ic="grid"></i></div>
+          <div class="home-empty-text">还没有画布<br>点击右上角「新建画布」开始创作</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 顶部工具栏 ========== -->
+  <header id="topbar">
+    <div class="brand">
+      <div class="logo" id="logo-home" title="返回首页" onclick="if(window.LC&&LC.Home)LC.Home.back()">◈</div>
+      <input id="project-name" class="project-name" value="未命名项目" spellcheck="false">
+      <span id="save-status" class="save-status" title="保存状态">已保存</span>
+    </div>
+    <nav class="menu">
+      <div class="menu-item" data-menu="file">文件 ▾
+        <div class="dropdown">
+          <button data-act="save"><i data-ic="save"></i> 保存项目</button>
+          <button data-act="export-json"><i data-ic="file"></i> 导出工程文件 (.lctv)</button>
+          <button data-act="import-json"><i data-ic="folder"></i> 导入工程文件</button>
+          <button data-act="share"><i data-ic="link"></i> 分享工程链接</button>
+          <button data-act="open-history"><i data-ic="clock"></i> 历史项目</button>
+          <hr>
+          <button data-act="new"><i data-ic="file"></i> 新建项目</button>
+        </div>
+      </div>
+      <div class="menu-item" data-menu="edit">编辑 ▾
+        <div class="dropdown">
+          <button data-act="undo"><i data-ic="undo"></i> 撤销 <kbd>Ctrl+Z</kbd></button>
+          <button data-act="redo"><i data-ic="redo"></i> 重做 <kbd>Ctrl+Y</kbd></button>
+          <hr>
+          <button data-act="copy"><i data-ic="copy"></i> 复制节点 <kbd>Ctrl+C</kbd></button>
+          <button data-act="paste"><i data-ic="clipboard"></i> 粘贴节点 <kbd>Ctrl+V</kbd></button>
+          <button data-act="duplicate"><i data-ic="copy"></i> 快速复制(偏移) <kbd>Ctrl+D</kbd></button>
+          <button data-act="select-all"><i data-ic="grid"></i> 全选 <kbd>Ctrl+A</kbd></button>
+          <hr>
+          <button data-act="group"><i data-ic="cube"></i> 编组 <kbd>Ctrl+G</kbd></button>
+          <button data-act="delete"><i data-ic="trash"></i> 删除 <kbd>Del</kbd></button>
+        </div>
+      </div>
+      <div class="menu-item" data-menu="insert">插入 ▾
+        <div class="dropdown">
+          <button data-act="n-text"><i data-ic="text"></i> 文本节点</button>
+          <button data-act="n-image"><i data-ic="image"></i> 图片节点</button>
+          <button data-act="n-video"><i data-ic="video"></i> 视频节点</button>
+          <button data-act="n-audio"><i data-ic="audio"></i> 音频节点</button>
+          <button data-act="n-script"><i data-ic="script"></i> 脚本 / 分镜节点</button>
+          <hr>
+          <button data-act="n-stage"><i data-ic="stage"></i> 3D 导演台</button>
+          <button data-act="n-subtitle"><i data-ic="subtitle"></i> 字幕节点</button>
+          <button data-act="n-export"><i data-ic="export"></i> 成片拼接导出</button>
+          <button data-act="n-check"><i data-ic="check"></i> 合规校验</button>
+        </div>
+      </div>
+      <div class="menu-item" data-menu="view">视图 ▾
+        <div class="dropdown">
+          <button data-act="fit"><i data-ic="expand"></i> 适应全部节点 <kbd>F</kbd></button>
+          <button data-act="reset-view"><i data-ic="search"></i> 重置缩放 100%</button>
+          <div class="view-toggle-row">
+            <span>自动重跑下游</span><input type="checkbox" id="auto-rerun" checked>
+          </div>
+        </div>
+      </div>
+      <div class="menu-item" data-menu="templates">模板 ▾
+        <div class="dropdown">
+          <button data-act="save-template"><i data-ic="bookmark"></i> 保存当前链路为模板</button>
+          <button data-act="open-templates"><i data-ic="book"></i> 我的模板库</button>
+        </div>
+      </div>
+      <div class="menu-item" data-menu="settings">设置 ▾
+        <div class="dropdown">
+          <button data-act="settings"><i data-ic="gear"></i> API 接口 / 模型管理</button>
+        </div>
+      </div>
+      <div class="menu-item" data-menu="help">帮助 ▾
+        <div class="dropdown">
+          <button data-act="help-about"><i data-ic="info"></i> 关于 · 使用说明</button>
+        </div>
+      </div>
+    </nav>
+    <div class="top-actions">
+      <button id="btn-stage" class="btn accent" title="打开 3D 导演台"><i data-ic="stage"></i> 导演台</button>
+      <button id="btn-slash" class="btn primary" title="双击画布空白处也可召唤">/ 快捷指令</button>
+    </div>
+  </header>
+
+  <div id="workspace">
+    <!-- ========== 左侧面板 ========== -->
+    <aside id="left-panel">
+      <div class="panel-tabs">
+        <div class="ptab active" data-tab="nodelib">节点库</div>
+        <div class="ptab" data-tab="outline">分镜大纲</div>
+        <div class="ptab" data-tab="assets">资产库</div>
+      </div>
+
+      <!-- 节点库：拖拽/单击新建 -->
+      <div id="tab-nodelib" class="panel-body tab-body active">
+        <div class="lib-section">基础节点</div>
+        <div class="lib-grid" id="lib-basic"></div>
+        <div class="lib-section">AI 能力节点</div>
+        <div class="lib-grid" id="lib-ai"></div>
+        <div class="lib-section">后期 &amp; 工具</div>
+        <div class="lib-grid" id="lib-tool"></div>
+        <div class="lib-tip"><i data-ic="bulb"></i> 拖入画布 或 双击画布空白处输入「/」</div>
+      </div>
+
+      <!-- 分镜大纲 -->
+      <div id="tab-outline" class="panel-body tab-body">
+        <div id="outline-list" class="outline-list">
+          <div class="outline-empty">尚无分镜脚本<br>拖入「脚本节点」并点击 ▶ 拆解分镜</div>
+        </div>
+      </div>
+
+      <!-- 资产库 -->
+      <div id="tab-assets" class="panel-body tab-body">
+        <div id="assets-list" class="assets-list"></div>
+      </div>
+    </aside>
+
+    <!-- ========== 画布区 ========== -->
+    <main id="canvas-wrap">
+      <div id="canvas" class="canvas">
+        <div id="world" class="world">
+          <svg id="edges-svg" width="200000" height="200000"></svg>
+          <div id="groups-layer"></div>
+          <div id="nodes-layer"></div>
+        </div>
+        <div id="selection-rect" class="selection-rect" hidden></div>
+        <div id="align-guides" class="align-guides"></div>
+        <!-- 斜杠输入框 -->
+        <div id="slash-box" class="slash-box" hidden>
+          <input id="slash-input" placeholder="输入内容或 / 唤起指令，回车创建…" spellcheck="false">
+          <div id="slash-menu" class="slash-menu" hidden></div>
+        </div>
+        <!-- 迷你地图 -->
+        <div id="minimap" class="minimap">
+          <canvas id="minimap-canvas"></canvas>
+        </div>
+        <!-- 缩放控制 -->
+        <div id="zoom-ctrl" class="zoom-ctrl">
+          <button id="zoom-in" title="放大">+</button>
+          <span id="zoom-label">100%</span>
+          <button id="zoom-out" title="缩小">−</button>
+          <button id="zoom-fit" title="适应全部 (F)">⤢</button>
+        </div>
+        <!-- 底部提示词面板（选中图片/视频节点时显示） -->
+        <div id="prompt-panel" class="prompt-panel" hidden></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ========== 右键菜单 ========== -->
+  <div id="ctx-menu" class="ctx-menu" hidden></div>
+
+  <!-- ========== 弹层 ========== -->
+  <div id="modal-root"></div>
+
+  <!-- ========== Toast ========== -->
+  <div id="toast-root"></div>
+</div>
+
+<!-- Three.js 供 3D 导演台使用（按需加载） -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script>
+// 若 CDN 不可用（离线环境），降级提示
+window.THREE_READY = typeof THREE !== 'undefined';
+</script>
+
+<script src="js/utils.js?v=20260921a"></script>
+<script src="js/storage.js?v=20260921a"></script>
+<script src="js/cloud.js?v=20260921a"></script>
+<script src="js/graph.js?v=20260921a"></script>
+<script src="js/ai.js?v=20260921a"></script>
+<script src="js/canvas.js?v=20260921a"></script>
+<script src="js/nodes.js?v=20260921a"></script>
+<script src="js/edges.js?v=20260921a"></script>
+<script src="js/executor.js?v=20260921a"></script>
+<script src="js/director3d.js?v=20260921a"></script>
+<script src="js/ui/slash.js?v=20260921a"></script>
+<script src="js/ui/menubar.js?v=20260921a"></script>
+<script src="js/ui/library.js?v=20260921a"></script>
+<script src="js/ui/templates.js?v=20260921a"></script>
+<script src="js/ui/history.js?v=20260921a"></script>
+<script src="js/ui/settings.js?v=20260921a"></script>
+<script src="js/ui/modals.js?v=20260921a"></script>
+<script src="js/ui/home.js?v=20260921a"></script>
+<script src="js/ui/promptpanel.js?v=20260921a"></script>
+<script src="js/main.js?v=20260921a"></script>
+</body>
+</html>

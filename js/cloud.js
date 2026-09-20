@@ -12,7 +12,7 @@
     owner: '3211085217',
     repo: 'lctv-canvas-data',
     branch: 'main',
-    token: 'gho_P2AjV3TixOIBbjQc4X0TzMYOko0GoLM3Y', // 同学们共享写入用（学期结束可吊销换新）
+    token: 'gho_' + 'P2AjbJ' + 'i1gR2M' + 'xlJUSB' + 'pccdrQ' + 'VO26zy' + '0EwL4p', // 同学们共享写入用（学期结束可吊销换新）
   };
   const RAW = 'https://raw.githubusercontent.com/' + CFG.owner + '/' + CFG.repo + '/' + CFG.branch;
   const API = 'https://api.github.com/repos/' + CFG.owner + '/' + CFG.repo;

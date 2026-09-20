@@ -17,6 +17,8 @@
   const RAW = 'https://raw.githubusercontent.com/' + CFG.owner + '/' + CFG.repo + '/' + CFG.branch;
   const API = 'https://api.github.com/repos/' + CFG.owner + '/' + CFG.repo;
 
+  let _lastErr = null;   // 诊断：最近一次写入失败原因
+
   /* ---------- 基础工具 ---------- */
   const utf8b64 = (str) => btoa(unescape(encodeURIComponent(str)));
   const b64utf8 = (b64) => {
@@ -61,6 +63,8 @@
       if (r.ok) return true;
       if (r.status === 422) { sha = await getSHA(path); continue; }
       if (r.status === 403) throw new Error('云端写入频率过高，请稍后再试');
+      _lastErr = { status: r.status, body: '' };
+      try { _lastErr.body = (await r.text()).slice(0, 200); } catch (e) {}
       return false;
     }
     return false;
@@ -235,5 +239,6 @@
     toPublicUrl,
     aiTask,
     b64utf8,
+    _lastErr: () => _lastErr,
   };
 })();

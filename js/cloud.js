@@ -27,6 +27,7 @@
     }
   };
 
+  /* 基础请求：带 15s 超时 + 网络/5xx 自动重试一次（国内网络抖动免疫） */
   async function gh(path, method, body) {
     const opts = {
       method: method || 'GET',
@@ -37,10 +38,20 @@
       },
     };
     if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
-    const r = await fetch(API + path, opts);
-    let data = null;
-    try { data = await r.json(); } catch (e) {}
-    return { code: r.status, data };
+    let last = null;
+    for (let i = 0; i < 2; i++) {
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 15000);
+        const r = await fetch(API + path, { ...opts, signal: ctrl.signal });
+        clearTimeout(timer);
+        let data = null;
+        try { data = await r.json(); } catch (e) {}
+        if (r.status >= 500) { last = { code: r.status, data }; continue; }   // 服务端错误 → 重试一次
+        return { code: r.status, data };
+      } catch (e) { last = { code: 0, data: null }; continue; }               // 网络/超时 → 重试一次
+    }
+    return last || { code: 0, data: null };
   }
 
   async function getSHA(path) {
@@ -56,16 +67,11 @@
     for (let i = 0; i < 2; i++) {
       const body = { ...body0 };
       if (sha) body.sha = sha;
-      const r = await fetch(API + '/contents/' + path, {
-        method: 'PUT',
-        headers: { Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + CFG.token, 'Content-Type': 'application/json', 'X-GitHub-Api-Version': '2022-11-28' },
-        body: JSON.stringify(body),
-      });
-      if (r.ok) return true;
-      if (r.status === 422) { try { sha = await getSHA(path); } catch (e) {} continue; }
-      if (r.status === 403) throw new Error('云端写入频率过高，请稍后再试');
-      _lastErr = { status: r.status, body: '' };
-      try { _lastErr.body = (await r.text()).slice(0, 200); } catch (e) {}
+      const x = await gh('/contents/' + path, 'PUT', body);
+      if (x.code === 200 || x.code === 201) return true;
+      if (x.code === 422) { try { sha = await getSHA(path); } catch (e) {} continue; }
+      if (x.code === 403) throw new Error('云端写入频率过高，请稍后再试');
+      _lastErr = { status: x.code, body: '' };
       return false;
     }
     return false;
@@ -76,16 +82,11 @@
     let sha = await getSHA(path);
     if (!sha) return true;                       // 文件不存在 → 视为已删除
     for (let i = 0; i < 2; i++) {
-      const r = await fetch(API + '/contents/' + path, {
-        method: 'DELETE',
-        headers: { Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + CFG.token, 'Content-Type': 'application/json', 'X-GitHub-Api-Version': '2022-11-28' },
-        body: JSON.stringify({ message: 'remove ' + path, sha }),
-      });
-      if (r.ok) return true;
-      if (r.status === 409) { sha = await getSHA(path); if (sha) continue; return true; }  // 撞并发：拿新 sha 重试；文件已被他人删则视为成功
-      if (r.status === 403) throw new Error('云端删除频率过高，请稍后再试');
-      _lastErr = { status: r.status, body: '' };
-      try { _lastErr.body = (await r.text()).slice(0, 200); } catch (e) {}
+      const x = await gh('/contents/' + path, 'DELETE', { message: 'remove ' + path, sha });
+      if (x.code === 200 || x.code === 204) return true;
+      if (x.code === 409) { sha = await getSHA(path); if (sha) continue; return true; }  // 撞并发：拿新 sha 重试；文件已被他人删则视为成功
+      if (x.code === 403) throw new Error('云端删除频率过高，请稍后再试');
+      _lastErr = { status: x.code, body: '' };
       return false;
     }
     return false;
@@ -120,31 +121,39 @@
     return { m: { projects: [] }, sha: null };
   }
 
-  /* 读-改-写合并 manifest：基于每次拿到的最新内容 + sha 提交，避免并发丢更新；冲突时重读重试 */
+  /* 读-改-写合并 manifest：基于每次拿到的最新内容 + sha 提交，避免并发丢更新；冲突/网络失败时重读重试 */
   async function mergeManifest(mutate) {
     for (let i = 0; i < 3; i++) {
       const { m, sha } = await readManifestAPI();
       mutate(m);
       const body = { message: 'update manifest', content: utf8b64(JSON.stringify(m)) };
       if (sha) body.sha = sha;
-      const r = await fetch(API + '/contents/manifest.json', {
-        method: 'PUT',
-        headers: { Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + CFG.token, 'Content-Type': 'application/json', 'X-GitHub-Api-Version': '2022-11-28' },
-        body: JSON.stringify(body),
-      });
-      if (r.ok) return true;
-      if (r.status === 422 || r.status === 409) continue;   // 他人并发改动：读最新再来
-      if (r.status === 403) throw new Error('云端写入频率过高，请稍后再试');
+      const x = await gh('/contents/manifest.json', 'PUT', body);
+      if (x.code === 200 || x.code === 201) return true;
+      if (x.code === 422 || x.code === 409) continue;   // 他人并发改动：读最新再来
+      if (x.code === 403) throw new Error('云端写入频率过高，请稍后再试');
       return false;
     }
     return false;
   }
 
-  /* 列表：manifest 权威 + 容错回退 */
+  /* 列表：manifest + 云端文件树合并 → 过滤已删文件但仍留索引的幽灵条目（删不掉的画布） */
   async function list() {
     try {
-      const m = await readManifest();
-      return m.projects || [];
+      const [m, tree] = await Promise.all([
+        readManifest(),
+        (async () => {
+          const x = await gh('/git/trees/' + CFG.branch + '?recursive=1');
+          const set = new Set();
+          ((x && x.data && x.data.tree) || []).forEach((it) => {
+            if (it.type === 'blob' && it.path.startsWith('projects/') && it.path.endsWith('.json')) {
+              set.add(it.path.slice('projects/'.length, -'.json'.length));
+            }
+          });
+          return set;
+        })(),
+      ]);
+      return (m.projects || []).filter((p) => p.id && tree.has(p.id));
     } catch (e) { return []; }
   }
 
@@ -200,15 +209,11 @@
     for (let i = 0; i < 2; i++) {
       const body = { ...body0 };
       if (sha) body.sha = sha;
-      const r = await fetch(API + '/contents/' + path, {
-        method: 'PUT',
-        headers: { Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + CFG.token, 'Content-Type': 'application/json', 'X-GitHub-Api-Version': '2022-11-28' },
-        body: JSON.stringify(body),
-      });
-      if (r.ok) return { url: RAW + '/' + path, name: safeName, size: buf.byteLength };
-      if (r.status === 422) { sha = await getSHA(path); continue; }
-      if (r.status === 403) throw new Error('云端上传频率过高，请稍后再试');
-      throw new Error('上传失败 HTTP ' + r.status);
+      const x = await gh('/contents/' + path, 'PUT', body);
+      if (x.code === 200 || x.code === 201) return { url: RAW + '/' + path, name: safeName, size: buf.byteLength };
+      if (x.code === 422) { sha = await getSHA(path); continue; }
+      if (x.code === 403) throw new Error('云端上传频率过高，请稍后再试');
+      throw new Error('上传失败 HTTP ' + x.code);
     }
     throw new Error('上传失败');
   }

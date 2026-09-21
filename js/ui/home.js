@@ -7,7 +7,28 @@
 
   const Home = {
     _currentId: null,   // 当前打开的画布 id
-    _deleted: new Set(), // 已删除的画布 id：阻止残留自动保存把空画布写回云端原地复活
+    _deleted: new Set((() => { try { return JSON.parse(localStorage.getItem('lc_deleted') || '[]'); } catch (e) { return []; } })( )), // 已删除id：持久化，跨页面阻止复活
+
+    /* 已删除标记：内存 + localStorage 双检查（跨页面共享，任何页面都不能把已删画布写回云端/复活） */
+    _isDeleted(id) {
+      if (this._deleted.has(id)) return true;
+      try { if ((JSON.parse(localStorage.getItem('lc_deleted') || '[]')).includes(id)) return true; } catch (e) {}
+      return false;
+    },
+    _markDeleted(id) {
+      this._deleted.add(id);
+      try {
+        const arr = JSON.parse(localStorage.getItem('lc_deleted') || '[]');
+        if (!arr.includes(id)) { arr.push(id); localStorage.setItem('lc_deleted', JSON.stringify(arr.slice(-300))); }
+      } catch (e) {}
+    },
+    _unmarkDeleted(id) {
+      this._deleted.delete(id);
+      try {
+        const arr = (JSON.parse(localStorage.getItem('lc_deleted') || '[]')).filter((x) => x !== id);
+        localStorage.setItem('lc_deleted', JSON.stringify(arr));
+      } catch (e) {}
+    },
 
     /* ---------- 磁盘 API ---------- */
     async _list() {
@@ -46,7 +67,7 @@
         cached.forEach((p) => byId.set(p.id, p));
       }
       return Array.from(byId.values())
-        .filter((p) => !this._deleted.has(p.id))
+        .filter((p) => !this._isDeleted(p.id))
         .sort((a, b) =>
         String(b.updatedAt || b.createdAt).localeCompare(String(a.updatedAt || a.createdAt))
       );
@@ -129,14 +150,14 @@
 
     /* ---------- 删除画布 ---------- */
     async del(id) {
-      this._deleted.add(id);
+      this._markDeleted(id);
       if (this._currentId === id) this._currentId = null;
       await this._removeCache(id);
       this.render();                       // 立即从列表消失（乐观删除），云端删除在后台执行
       LC.Cloud.del(id).then(() => {
         LC.App?.toast?.('画布已删除', 'ok');
       }).catch(() => {
-        this._deleted.delete(id);          // 云端失败：允许列表恢复，提示重试
+        this._unmarkDeleted(id);           // 云端失败：允许列表恢复，提示重试
         LC.App?.toast?.('云端删除失败，请重试', 'err');
         if (LC.Home && LC.Home.render) LC.Home.render();
       });
@@ -166,7 +187,7 @@
      */
     async saveCurrent(id = this._currentId, options = {}, snapshot = null) {
       if (!id || !LC.App.graph) return false;
-      if (this._deleted.has(id)) return false;   // 已被删除的画布：停止任何待执行的保存
+      if (this._isDeleted(id)) return false;   // 已删除的画布：任何页面都不能再写回云端/复活
       const json = snapshot || LC.App.sanitizeJSON();
       json.name = LC.App.projectName;
       try {

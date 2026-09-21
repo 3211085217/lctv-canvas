@@ -100,6 +100,7 @@
         await this.runUpstream(id);
         // 运行开始即生成任务 ID 并持久化：中途刷新也能查到后端任务（刷新后续轮询，不重新生成）
         n.state.taskId = U.uid('ai');
+        n.state.extTask = null;              // 清掉上轮残留的第三方任务信息，本轮重新挂接
         n.state.status = 'running'; n.state.progress = 0; n.state.output = null; n.state.error = null;
         LC.App.nodes.updateNode(id);
         if (LC.App.forceSave) LC.App.forceSave();   // 立即持久化 running 状态 + taskId，刷新后可恢复

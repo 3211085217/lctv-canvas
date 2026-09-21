@@ -7,6 +7,7 @@
 
   const Home = {
     _currentId: null,   // 当前打开的画布 id
+    _deleted: new Set(), // 已删除的画布 id：阻止残留自动保存把空画布写回云端原地复活
 
     /* ---------- 磁盘 API ---------- */
     async _list() {
@@ -115,9 +116,10 @@
 
     /* ---------- 删除画布 ---------- */
     async del(id) {
+      this._deleted.add(id);
       let ok = true;
       try { await LC.Cloud.del(id); }
-      catch (e) { ok = false; }
+      catch (e) { ok = false; this._deleted.delete(id); }
       if (this._currentId === id) this._currentId = null;
       await this._removeCache(id);
       this.render();
@@ -147,6 +149,7 @@
      */
     async saveCurrent(id = this._currentId, options = {}, snapshot = null) {
       if (!id || !LC.App.graph) return false;
+      if (this._deleted.has(id)) return false;   // 已被删除的画布：停止任何待执行的保存
       const json = snapshot || LC.App.sanitizeJSON();
       json.name = LC.App.projectName;
       try {

@@ -12,8 +12,10 @@
     /* ---------- 磁盘 API ---------- */
     async _list() {
       let disk = [];
+      let cloudOk = false;
       try {
         disk = await LC.Cloud.list();
+        cloudOk = true;
       } catch (e) {}
       if (!Array.isArray(disk)) disk = [];
       let cached = [];
@@ -32,10 +34,17 @@
           };
         }).filter((p) => p.id);
       } catch (e) {}
-      const byId = new Map(cached.map((p) => [p.id, p]));
-      // 本地已删（云端删除在后台）的画布不再显示
-      disk = disk.filter((p) => !this._deleted.has(p.id));
-      disk.forEach((p) => byId.set(p.id, { ...byId.get(p.id), ...p, cached: false }));
+      const byId = new Map();
+      if (cloudOk) {
+        // 在线：以云端为准（删除即消失）；本地缓存仅补充展示信息，杜绝"云端已删、缓存复活"
+        disk.forEach((p) => {
+          const c = cached.find((x) => x.id === p.id);
+          byId.set(p.id, { ...(c || {}), ...p, cached: false });
+        });
+      } else {
+        // 离线：退回本地缓存
+        cached.forEach((p) => byId.set(p.id, p));
+      }
       return Array.from(byId.values())
         .filter((p) => !this._deleted.has(p.id))
         .sort((a, b) =>

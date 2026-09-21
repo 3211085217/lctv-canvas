@@ -169,6 +169,7 @@
       }
       box.innerHTML = '';
       const icons = { image: 'image', video: 'video', audio: 'audio', shots: 'script', report: 'check' };
+      const typeText = { image: '图片', video: '视频', audio: '音频', file: '文件' };
       this.items.forEach((a) => {
         const d = document.createElement('div');
         d.className = 'asset-card';
@@ -182,9 +183,21 @@
           : (a.type === 'audio'
             ? `<span class="ph">${U.icon('audio', 20)}</span>`
             : (imgSrc ? `<img src="${imgSrc}" loading="lazy" decoding="async" draggable="false" width="56" height="56">` : `<span class="ph">${U.icon(icons[a.type], 20)}</span>`));
+        // 类型角标：一眼区分图片 / 视频 / 音频
+        const badge = a.type === 'video' ? `<span class="ac-badge bad-video">${U.icon('play', 9)} 视频</span>`
+          : a.type === 'audio' ? `<span class="ac-badge bad-audio">${U.icon('audio', 9)} 音频</span>`
+          : a.type === 'image' ? `<span class="ac-badge bad-image">${U.icon('image', 9)} 图片</span>`
+          : `<span class="ac-badge">${U.icon('file', 9)} 文件</span>`;
+        // 名称去扩展名显示，扩展名用小字跟在后面
+        const lastDot = a.name.lastIndexOf('.');
+        const base = lastDot > 0 ? a.name.slice(0, lastDot) : a.name;
+        const ext = lastDot > 0 ? a.name.slice(lastDot) : '';
         d.innerHTML = `
-          <div class="ac-thumb">${thumbHtml}</div>
-          <div class="ac-info"><div class="ac-name">${U.esc(a.name)}</div><div class="ac-meta">${U.esc(a.meta || '')} · ${a.time}</div></div>`;
+          <div class="ac-thumb">${thumbHtml}${badge}</div>
+          <div class="ac-info">
+            <div class="ac-name" title="${U.esc(a.name)}">${U.esc(base)}${ext ? `<span class="ac-ext">${U.esc(ext)}</span>` : ''}</div>
+            <div class="ac-meta">${typeText[a.type] || a.type}${a.meta ? ' · ' + U.esc(a.meta) : ''} · ${a.time}</div>
+          </div>`;
         // 自定义小尺寸 ghost + 全局单 cleaner：避免浏览器克隆含大 base64 图的整张卡片导致拖动卡顿
         d.addEventListener('dragstart', (e) => {
           e.dataTransfer.setData('text/asset-id', a.id);

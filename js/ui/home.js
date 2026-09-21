@@ -84,12 +84,8 @@
     async create(name) {
       const id = U.uid('c');
       const empty = { nodes: [], edges: [], groups: [], name: name || '未命名画布', createdAt: U.formatTime() };
-      try {
-        await this._saveFile(id, empty);
-      } catch (e) {
-        await this._cache(id, empty);
-      }
-      await this._cache(id, empty);
+      await this._cache(id, empty);                 // 本地立刻可见
+      this._saveFile(id, empty).catch(() => {});    // 云端保存后台异步，不阻塞进入画布（网络慢也不卡新建）
       return id;
     },
 
@@ -115,10 +111,13 @@
 
     /* ---------- 删除画布 ---------- */
     async del(id) {
-      await LC.Cloud.del(id).catch(() => {});
+      let ok = true;
+      try { await LC.Cloud.del(id); }
+      catch (e) { ok = false; }
       if (this._currentId === id) this._currentId = null;
       await this._removeCache(id);
       this.render();
+      return ok;
     },
 
     /* ---------- 重命名 ---------- */
@@ -199,8 +198,8 @@
         card.querySelector('[data-del]').onclick = async () => {
           const c = (await this.list()).find((x) => x.id === id);
           if (await LC.Modal.confirm('删除画布', `确定删除「${c?.name}」？此操作不可撤销。`)) {
-            await this.del(id);
-            LC.App.toast('画布已删除', 'ok');
+            const ok = await this.del(id);
+            LC.App.toast(ok ? '画布已删除' : '删除失败，请重试', ok ? 'ok' : 'err');
           }
         };
       });

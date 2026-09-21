@@ -958,7 +958,7 @@
       el.style.transform = `translate(${n.x}px, ${n.y}px)`;
       if (light) return;                   // 拖动中：仅更新 transform，边由 rAF refreshMoving 统一重绘
       const h = el.offsetHeight;
-      el.dataset.h = h;
+      if (h > 0) el.dataset.h = h;         // 只缓存有效高度；display:none 时 offsetHeight=0，写入会污染缓存导致组框包不住
       LC.App.edges.refreshMoving([n.id]);  // 只更新连接到此节点的边，不再全量 refresh
     }
 
@@ -1276,9 +1276,20 @@
         const n = this.graph.getNode(id);
         if (!n) continue;
         const elN = this.els.get(id);
-        // 优先用 position() 缓存的真实高度 dataset.h；其次视口剔除缓存 _cullH；最次默认 240。
-        // 只读 _cullH 会在剔除未跑/过期时退回 240，导致组框包不住节点（点一下重新量才恢复）。
-        const h = Number((elN && elN.dataset.h) || (elN && elN._cullH) || n._h || 240);
+        // 隐藏节点（视口剔除 / 折叠）：offsetHeight=0，必须用缓存（dataset.h / _cullH / n._h），
+        // 否则退回 240 会让组框包不住高节点（点一下重新量才恢复的老 bug）。
+        // 可见节点：优先缓存 dataset.h（拖动中布局 clean），缓存缺失才量一次真实高度并回填。
+        let h = 0;
+        if (elN) {
+          h = Number(elN.dataset.h || 0);
+          if (!h && elN.style.display !== 'none') {
+            const rh = elN.offsetHeight;
+            if (rh > 0) { elN.dataset.h = rh; h = rh; }
+          }
+          if (!h) h = Number(elN._cullH || 0);
+        }
+        if (!h) h = Number(n._h || 0);
+        if (!h) h = 240;
         minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
         maxX = Math.max(maxX, n.x + n.w); maxY = Math.max(maxY, n.y + h);
       }

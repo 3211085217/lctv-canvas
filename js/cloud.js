@@ -177,10 +177,16 @@
     try { return JSON.parse(t); } catch (e) { return null; }
   }
 
-  /* 删除画布：删工程文件（带 sha）+ 从 manifest 移除；失败抛错由调用方如实提示 */
+  /* 删除画布：删工程文件（带 sha，删除后复查防并发保存重建）+ 从 manifest 移除；失败抛错由调用方如实提示 */
   async function del(id) {
-    const okFile = await delFile('projects/' + id + '.json');
-    if (!okFile) throw new Error('云端删除失败');
+    for (let i = 0; i < 3; i++) {
+      const okFile = await delFile('projects/' + id + '.json');
+      if (!okFile) throw new Error('云端删除失败');
+      await new Promise((res) => setTimeout(res, 500));   // 稍候防并发保存把文件重建
+      const sha = await getSHA('projects/' + id + '.json');
+      if (!sha) break;                                     // 文件确认已不存在
+      if (i === 2) throw new Error('云端删除冲突，请重试');
+    }
     await mergeManifest((m) => { m.projects = (m.projects || []).filter((p) => p.id !== id); });
   }
 

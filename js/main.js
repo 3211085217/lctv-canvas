@@ -375,6 +375,9 @@
 
     /* ---------- 框选 ---------- */
     onBoxSelect(r) {
+      // 兜底：pointerdown 起始事件只带 start 不带 cur（canvas.js fire 'boxselect' origin:'start'），
+      // 直接读 r.cur.x 会抛 "Cannot read properties of undefined (reading 'x')"
+      if (!r.cur) r.cur = r.start;
       const rect = U.$('#selection-rect');
       if (!r.active) {
         if (r.origin === 'up') {

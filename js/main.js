@@ -25,7 +25,18 @@
       this.nodes = new LC.NodeView(U.$('#nodes-layer'), this.graph);
       this.edges = new LC.EdgesView(U.$('#edges-svg'), this.graph);
       this.view = new LC.CanvasView(U.$('#canvas-wrap'), U.$('#world'));
-      this.graph.setHeightGetter((n) => Number(this.nodes.els.get(n.id)?.offsetHeight || 240));
+      // 节点高度：可见时读真实 offsetHeight（布局 clean 时是廉价缓存查询）；display:none（视口剔除）时
+      // 必须用缓存，否则 offsetHeight=0 会让组框按 240 兜底算，包不住高节点
+      this.graph.setHeightGetter((n) => {
+        const el = this.nodes.els.get(n.id);
+        if (!el) return Number(n._h || 240);
+        if (el.style.display === 'none') {
+          return Number(el.dataset.h || el._cullH || n._h || 240);
+        }
+        const h = el.offsetHeight;
+        if (h > 0) el.dataset.h = h;
+        return h > 0 ? h : Number(el.dataset.h || el._cullH || n._h || 240);
+      });
 
       LC.Menubar.init();
       LC.Slash.init();

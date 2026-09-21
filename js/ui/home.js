@@ -70,11 +70,15 @@
       await LC.Cloud.save(id, obj);
     },
     async _loadFile(id) {
+      // 本地缓存优先 → 秒开（避免每个画布都要等一次云端请求，国内网络往返 3-10s）；
+      // 本地没有（如同学新建的）才走云端
+      const cached = await this._getCached(id);
+      if (cached) return cached;
       try {
         const d = await LC.Cloud.load(id);
         if (d && Array.isArray(d.nodes)) return d;
       } catch (e) {}
-      return this._getCached(id);
+      return null;
     },
 
     /* ---------- 元信息 ---------- */

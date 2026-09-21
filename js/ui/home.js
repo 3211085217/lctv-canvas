@@ -33,8 +33,12 @@
         }).filter((p) => p.id);
       } catch (e) {}
       const byId = new Map(cached.map((p) => [p.id, p]));
+      // 本地已删（云端删除在后台）的画布不再显示
+      disk = disk.filter((p) => !this._deleted.has(p.id));
       disk.forEach((p) => byId.set(p.id, { ...byId.get(p.id), ...p, cached: false }));
-      return Array.from(byId.values()).sort((a, b) =>
+      return Array.from(byId.values())
+        .filter((p) => !this._deleted.has(p.id))
+        .sort((a, b) =>
         String(b.updatedAt || b.createdAt).localeCompare(String(a.updatedAt || a.createdAt))
       );
     },
@@ -117,13 +121,17 @@
     /* ---------- 删除画布 ---------- */
     async del(id) {
       this._deleted.add(id);
-      let ok = true;
-      try { await LC.Cloud.del(id); }
-      catch (e) { ok = false; this._deleted.delete(id); }
       if (this._currentId === id) this._currentId = null;
       await this._removeCache(id);
-      this.render();
-      return ok;
+      this.render();                       // 立即从列表消失（乐观删除），云端删除在后台执行
+      LC.Cloud.del(id).then(() => {
+        LC.App?.toast?.('画布已删除', 'ok');
+      }).catch(() => {
+        this._deleted.delete(id);          // 云端失败：允许列表恢复，提示重试
+        LC.App?.toast?.('云端删除失败，请重试', 'err');
+        if (LC.Home && LC.Home.render) LC.Home.render();
+      });
+      return true;
     },
 
     /* ---------- 重命名 ---------- */
@@ -205,8 +213,7 @@
         card.querySelector('[data-del]').onclick = async () => {
           const c = (await this.list()).find((x) => x.id === id);
           if (await LC.Modal.confirm('删除画布', `确定删除「${c?.name}」？此操作不可撤销。`)) {
-            const ok = await this.del(id);
-            LC.App.toast(ok ? '画布已删除' : '删除失败，请重试', ok ? 'ok' : 'err');
+            this.del(id);
           }
         };
       });

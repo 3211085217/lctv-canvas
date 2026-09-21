@@ -48,10 +48,11 @@
     return (x && x.data && x.data.sha) ? x.data.sha : null;
   }
 
-  /* 写文件：带 sha 更新，并发冲突(422)时拿新 sha 重试一次 */
+  /* 写文件：新建不带 sha，更新带 sha；并发冲突(422)时读新 sha 重试一次 */
   async function putFile(path, content, msg) {
     const body0 = { message: msg || 'update ' + path, content: utf8b64(content) };
-    let sha = await getSHA(path);
+    let sha = null;
+    try { sha = await getSHA(path); } catch (e) {}
     for (let i = 0; i < 2; i++) {
       const body = { ...body0 };
       if (sha) body.sha = sha;
@@ -61,7 +62,7 @@
         body: JSON.stringify(body),
       });
       if (r.ok) return true;
-      if (r.status === 422) { sha = await getSHA(path); continue; }
+      if (r.status === 422) { try { sha = await getSHA(path); } catch (e) {} continue; }
       if (r.status === 403) throw new Error('云端写入频率过高，请稍后再试');
       _lastErr = { status: r.status, body: '' };
       try { _lastErr.body = (await r.text()).slice(0, 200); } catch (e) {}
@@ -70,8 +71,24 @@
     return false;
   }
 
-  function delFile(path) {
-    return gh('/contents/' + path, 'DELETE', { message: 'remove ' + path });
+  /* 删除文件：GitHub Contents API 的 DELETE 必须带 sha，否则 409 删不掉 */
+  async function delFile(path) {
+    let sha = await getSHA(path);
+    if (!sha) return true;                       // 文件不存在 → 视为已删除
+    for (let i = 0; i < 2; i++) {
+      const r = await fetch(API + '/contents/' + path, {
+        method: 'DELETE',
+        headers: { Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + CFG.token, 'Content-Type': 'application/json', 'X-GitHub-Api-Version': '2022-11-28' },
+        body: JSON.stringify({ message: 'remove ' + path, sha }),
+      });
+      if (r.ok) return true;
+      if (r.status === 409) { sha = await getSHA(path); if (sha) continue; return true; }  // 撞并发：拿新 sha 重试；文件已被他人删则视为成功
+      if (r.status === 403) throw new Error('云端删除频率过高，请稍后再试');
+      _lastErr = { status: r.status, body: '' };
+      try { _lastErr.body = (await r.text()).slice(0, 200); } catch (e) {}
+      return false;
+    }
+    return false;
   }
 
   /* raw 读取（缓存戳防 CDN 陈旧） */
@@ -91,8 +108,36 @@
     } catch (e) { return { projects: [] }; }
   }
 
-  async function writeManifest(m) {
-    await putFile('manifest.json', JSON.stringify(m), 'update manifest');
+  /* 权威读取 manifest（走 API，拿到最新内容 + sha），写路径专用，避免 raw CDN 陈旧覆盖 */
+  async function readManifestAPI() {
+    const x = await gh('/contents/manifest.json');
+    if (x.code === 200 && x.data && x.data.content && x.data.sha) {
+      try {
+        const m = JSON.parse(b64utf8(x.data.content));
+        if (m && Array.isArray(m.projects)) return { m, sha: x.data.sha };
+      } catch (e) {}
+    }
+    return { m: { projects: [] }, sha: null };
+  }
+
+  /* 读-改-写合并 manifest：基于每次拿到的最新内容 + sha 提交，避免并发丢更新；冲突时重读重试 */
+  async function mergeManifest(mutate) {
+    for (let i = 0; i < 3; i++) {
+      const { m, sha } = await readManifestAPI();
+      mutate(m);
+      const body = { message: 'update manifest', content: utf8b64(JSON.stringify(m)) };
+      if (sha) body.sha = sha;
+      const r = await fetch(API + '/contents/manifest.json', {
+        method: 'PUT',
+        headers: { Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + CFG.token, 'Content-Type': 'application/json', 'X-GitHub-Api-Version': '2022-11-28' },
+        body: JSON.stringify(body),
+      });
+      if (r.ok) return true;
+      if (r.status === 422 || r.status === 409) continue;   // 他人并发改动：读最新再来
+      if (r.status === 403) throw new Error('云端写入频率过高，请稍后再试');
+      return false;
+    }
+    return false;
   }
 
   /* 列表：manifest 权威 + 容错回退 */
@@ -103,17 +148,17 @@
     } catch (e) { return []; }
   }
 
-  /* 保存画布：工程文件 + 更新索引（失败抛错由调用方兜底缓存） */
+  /* 保存画布：工程文件 + 索引并行提交（失败抛错由调用方兜底缓存） */
   async function save(id, obj) {
-    const ok = await putFile('projects/' + id + '.json', JSON.stringify(obj, null, 0), 'save ' + (obj.name || id));
-    if (!ok) throw new Error('云端保存失败');
-    try {
-      const m = await readManifest();
+    const pFile = putFile('projects/' + id + '.json', JSON.stringify(obj, null, 0), 'save ' + (obj.name || id));
+    const pManifest = mergeManifest((m) => {
       const now = new Date().toLocaleString('zh-CN', { hour12: false });
       const old = (m.projects || []).filter((p) => p.id !== id);
       m.projects = [{ id, name: obj.name || '未命名画布', createdAt: obj.createdAt || now, updatedAt: now }, ...old].slice(0, 200);
-      await writeManifest(m);
-    } catch (e) { /* 索引失败不阻塞工程保存 */ }
+    });
+    const [okFile, okManifest] = await Promise.all([pFile, pManifest]);
+    if (!okFile) throw new Error('云端保存失败');
+    if (!okManifest) console.warn('[Cloud.save] manifest 更新失败（不影响画布保存）');
   }
 
   /* 载入画布：云端优先，404 返回 null */
@@ -123,13 +168,11 @@
     try { return JSON.parse(t); } catch (e) { return null; }
   }
 
+  /* 删除画布：删工程文件（带 sha）+ 从 manifest 移除；失败抛错由调用方如实提示 */
   async function del(id) {
-    await delFile('projects/' + id + '.json');
-    try {
-      const m = await readManifest();
-      m.projects = (m.projects || []).filter((p) => p.id !== id);
-      await writeManifest(m);
-    } catch (e) {}
+    const okFile = await delFile('projects/' + id + '.json');
+    if (!okFile) throw new Error('云端删除失败');
+    await mergeManifest((m) => { m.projects = (m.projects || []).filter((p) => p.id !== id); });
   }
 
   /* ---------- 资产 ---------- */

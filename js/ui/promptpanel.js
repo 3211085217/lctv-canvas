@@ -208,6 +208,7 @@
       // 风格按钮固定显示"风格"，选中后右侧显示风格名
       this.el.innerHTML = `
         <div class="pp-inner">
+          <div class="pp-node-title" title="当前面板绑定的节点（下方 ▶ 只生成这个节点）">${U.icon('target', 12)} ${U.esc(n.title)}</div>
           <div class="pp-top">
             <div class="pp-tags">
               ${refBtns}
@@ -257,6 +258,7 @@
       };
       this.el.innerHTML = `
         <div class="pp-inner">
+          <div class="pp-node-title" title="当前面板绑定的节点（下方 ▶ 只生成这个节点）">${U.icon('target', 12)} ${U.esc(n.title)}</div>
           <div class="pp-input-wrap">
             <div class="pp-input" contenteditable="true" spellcheck="false" data-ppprop="${cfg.promptProp}"
               data-placeholder="${cfg.placeholder}">${LC.Mention.textToHTML(p[cfg.promptProp] || '')}</div>

@@ -206,6 +206,12 @@
      * 避免每帧 O(N×P) 全端口扫描 + getBoundingClientRect 强制布局导致卡顿 */
     startLink(portEl, side, ev) {
       if (this._linking) return;
+      // 连线方向识别：只允许从输出端口（out）开始拖线，松手目标必须是输入端口（in）。
+      // 否则用户从左侧输入口起线会连出反向边，数据流向与直觉相反（"连了参考图却不生效"的根源）。
+      if (side !== 'out') {
+        LC.App.toast('请从节点右侧的输出端口（● 输出）开始拖线，连接到目标节点左侧的输入端口', 'warn');
+        return;
+      }
       this._linking = true;
       const nid = portEl.dataset.node, pid = portEl.dataset.port;
       document.body.classList.add('linking');

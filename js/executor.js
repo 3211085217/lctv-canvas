@@ -93,11 +93,18 @@
       const g = LC.App.graph;
       const n = g.getNode(id);
       if (!n || this.running.has(id)) return;
+      // 积分扣费（云端充值系统）：后端按 kind 定价；余额不足 → 弹充值窗并中止本次生成
+      const creditKind = { image: 'image', video: 'video', audio: 'audio' }[n.type];
+      if (creditKind && LC.Credit) {
+        const allowed = await LC.Credit.consume(creditKind);
+        if (!allowed) return;
+        this._paidKind = creditKind;
+      }
       this.running.add(id);   // 先标记：防止 @/连线 循环引用导致无限递归
       let progTimer = null;
       try {
-        // 上游未执行 -> 先跑上游（连线 + @引用）
-        await this.runUpstream(id);
+        // 上游未执行时绝不自动执行（点击谁就只生成谁，不偷偷跑其他节点）：
+        // collect 只会取上游已有的输出，未生成的上游节点直接当无输入跳过。
         // 运行开始即生成任务 ID 并持久化：中途刷新也能查到后端任务（刷新后续轮询，不重新生成）
         n.state.taskId = U.uid('ai');
         n.state.extTask = null;              // 清掉上轮残留的第三方任务信息，本轮重新挂接
@@ -144,16 +151,23 @@
         n.state.status = 'error';
         n.state.error = err.message;
         LC.App.toast(`「${n.title}」执行失败：${err.message}`, 'err');
+        // 生成失败退款：任务未提交到上游（无 extTask = 上游没收钱）才退回积分
+        if (this._paidKind && LC.Credit) {
+          if (!n.state.extTask) LC.Credit.refund(this._paidKind);
+          this._paidKind = null;
+        }
       } finally {
         if (progTimer) clearInterval(progTimer);
         LC.__onExtTask = null;
         this.running.delete(id);
+        this._paidKind = null;
       }
       LC.App.nodes.updateNode(id);
       g.emit('change');
       LC.App.saveSoon();
       LC.App.view.renderMinimap();
-      this.autoDownstream(id);
+      // 手动执行后不再自动联动下游：点击谁就只生成谁（下游需手动点 ▶；
+      // 恢复既有任务(resume)仍保留 autoDownstream 继续原链路）
     },
 
     /* ---------- 刷新后恢复：扫描 running 节点，查后端任务状态 ---------- */
@@ -276,17 +290,6 @@
       } finally {
         clearInterval(progTimer);
         LC.App.saveSoon();
-      }
-    },
-
-    /* 递归保证上游完成（连线 + @引用） */
-    async runUpstream(id) {
-      const n = LC.App.graph.getNode(id);
-      if (!n) return;
-      const ids = (await this.collect(n)).refs;
-      for (const uid of ids) {
-        const un = LC.App.graph.getNode(uid);
-        if (!un || !un.state.output) await this.run(uid);
       }
     },
 

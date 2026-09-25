@@ -673,6 +673,10 @@ body.linking .port{ pointer-events:auto; }
 .prompt-panel{ position:absolute; left:0; top:0; z-index:80; width:560px; box-sizing:border-box; cursor:default; }
 .pp-inner{ box-sizing:border-box; background:#181818; border:1px solid #2e2e32; border-radius:16px;
   box-shadow:0 8px 32px rgba(0,0,0,.55); overflow:hidden; width:100%; }
+/* 面板所属节点标题：明确"这个面板在编辑谁 / ▶ 会生成谁"，避免点生成跑错节点 */
+.pp-node-title{ display:flex; align-items:center; gap:6px; padding:7px 12px 0;
+  font-size:11.5px; color:#c9a86a; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pp-node-title .lc-ic{ color:#8f8f8f; flex:none; }
 .pp-top{ display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 10px 4px; }
 .pp-tags{ display:flex; align-items:center; gap:6px; flex-wrap:nowrap; }
 .pp-tag{ display:inline-flex; align-items:center; gap:4px; background:#222222; border:1px solid #2e2e32; white-space:nowrap;
@@ -778,3 +782,19 @@ body.linking .port{ pointer-events:auto; }
   padding:6px 8px; border-radius:6px; cursor:pointer; text-align:center; white-space:nowrap; transition:.1s; }
 .pp-style-item:hover{ border-color:var(--accent); color:var(--text); }
 .pp-style-item.on{ color:var(--accent); border-color:rgba(212,168,83,.6); background:rgba(212,168,83,.10); }
+
+/* ================= 积分系统（云端充值入口） ================= */
+#credit-btn.credit-low{ color:#ff8ba7; border-color:rgba(255,139,167,.4); }
+.credit-box{ font-size:13px; }
+.credit-bal{ color:var(--text2); margin-bottom:10px; display:flex; align-items:center; gap:8px; }
+.credit-bal b{ color:#d0b88a; font-size:16px; }
+.credit-rate{ font-size:11px; color:var(--text3); background:#222226; border:1px solid var(--line2); padding:1px 8px; border-radius:99px; }
+.credit-qrs{ display:flex; gap:12px; justify-content:center; margin-bottom:6px; }
+.credit-qr{ text-align:center; flex:1; }
+.credit-qr img{ width:170px; height:212px; object-fit:cover; background:#fff; border-radius:10px; border:1px solid var(--line); }
+.credit-qr-label{ font-size:12px; color:var(--text2); margin-top:6px; }
+.credit-qr-tip{ font-size:11.5px; color:var(--text3); margin-top:8px; line-height:1.8; }
+.credit-row{ display:flex; gap:8px; align-items:center; }
+.credit-row .mp-input{ flex:1; }
+.credit-row .btn{ flex:none; }
+.credit-prices{ font-size:11px; color:var(--text3); margin-top:10px; line-height:1.7; }

@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>卡密生成器 · 仅管理员使用</title>
+<style>
+  body{ margin:0; background:#101012; color:#e6e6e6; font-family:system-ui,"Microsoft YaHei",sans-serif;
+    display:flex; align-items:center; justify-content:center; min-height:100vh; }
+  .card{ width:440px; background:#17171a; border:1px solid #2b2b30; border-radius:14px; padding:26px; }
+  h1{ font-size:18px; margin:0 0 6px; color:#d0b88a; }
+  .sub{ font-size:12px; color:#8a8a8a; margin-bottom:18px; line-height:1.7; }
+  label{ display:block; font-size:12.5px; color:#b0b0b0; margin:12px 0 4px; }
+  input{ width:100%; box-sizing:border-box; background:#101012; border:1px solid #2b2b30; color:#e6e6e6;
+    border-radius:8px; padding:9px 11px; font-size:13.5px; outline:none; }
+  input:focus{ border-color:#d0b88a; }
+  .row{ display:flex; gap:10px; } .row > div{ flex:1; }
+  button{ margin-top:18px; width:100%; background:#c9a86a; color:#111; border:none; border-radius:8px;
+    padding:11px; font-size:14.5px; font-weight:600; cursor:pointer; }
+  button:hover{ background:#dbbb7e; }
+  #out{ margin-top:18px; }
+  .sum{ font-size:12.5px; color:#9fd0ff; margin-bottom:8px; }
+  #codes{ background:#101012; border:1px solid #2b2b30; border-radius:8px; padding:10px 12px;
+    font-family:Consolas,monospace; font-size:12.5px; line-height:2; max-height:320px; overflow:auto;
+    white-space:pre-wrap; word-break:break-all; }
+  .err{ color:#ff8ba7; font-size:12.5px; margin-top:10px; }
+  .copy-btn{ margin-top:10px; background:#26262b; color:#d0d0d0; font-weight:400; font-size:13px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>卡密生成器</h1>
+  <div class="sub">1 元 = 1 积分。生成卡密后发给朋友，朋友在云端顶栏「积分 → 充值」里兑换。<br>卡密一次性、带签名无法伪造。此页面请勿发给别人。</div>
+  <label>管理密码（首次使用：见服务器 serve.log 里的 admin password）</label>
+  <input id="pwd" type="password" placeholder="管理密码">
+  <div class="row">
+    <div>
+      <label>面额（积分，1积分=1元）</label>
+      <input id="amount" type="number" value="10" min="1" max="999">
+    </div>
+    <div>
+      <label>张数（1~50）</label>
+      <input id="count" type="number" value="5" min="1" max="50">
+    </div>
+  </div>
+  <button id="go">生成卡密</button>
+  <div class="err" id="err"></div>
+  <div id="out" hidden>
+    <div class="sum" id="sum"></div>
+    <div id="codes"></div>
+    <button class="copy-btn" id="copyall">复制全部卡密</button>
+  </div>
+</div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  $('go').onclick = async () => {
+    $('err').textContent = '';
+    $('out').hidden = true;
+    $('go').disabled = true; $('go').textContent = '生成中…';
+    try {
+      const r = await fetch('/api/credit/gencards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: $('pwd').value, amount: Number($('amount').value), count: Number($('count').value) }),
+      });
+      const j = await r.json().catch(() => null);
+      if (!j) throw new Error('服务器无响应（确认此页面与后端同域部署）');
+      if (j.error) throw new Error(j.error);
+      $('sum').textContent = `共 ${j.codes.length} 张 · 每张 ${j.amount} 积分 · 小计 ${j.amount * j.codes.length} 元`;
+      $('codes').textContent = j.codes.join('\n');
+      $('out').hidden = false;
+    } catch (e) { $('err').textContent = '失败：' + e.message; }
+    $('go').disabled = false; $('go').textContent = '生成卡密';
+  };
+  $('copyall').onclick = () => {
+    navigator.clipboard.writeText($('codes').textContent).then(() => { $('copyall').textContent = '已复制 ✓'; setTimeout(() => $('copyall').textContent = '复制全部卡密', 1200); });
+  };
+</script>
+</body>
+</html>

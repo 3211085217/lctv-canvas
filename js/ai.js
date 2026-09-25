@@ -934,7 +934,7 @@
     // 注册第三方任务：刷新后据此续轮询原任务（不重新生成）
     noteExtTask({ proto: 'anmiao', base, modelId: cfg.modelId, modelName: cfg.name, kind: 'video', extTaskId: taskId, duration, resolution, ratio, mode });
 
-    /* 轮询：5s 间隔，上限 15 分钟 */
+    /* 轮询：5s 间隔，上限 15 分钟；状态大小写兼容（succeeded/SUCCEEDED） */
     let videoURL = '';
     for (let i = 0; i < 180; i++) {
       await U.sleep(5000);
@@ -945,11 +945,12 @@
       } catch (e) { /* 网络抖动：继续轮询 */ }
       if (!st) continue;
       onProgress?.(Math.min(90, 10 + i * 0.4));
-      if (st.status === 'failed') {
+      const sts = String((st && st.status) || '').toLowerCase();
+      if (sts === 'failed') {
         const errMsg = (st.error && (st.error.message || st.error.code)) || '未知原因（费用已自动退款）';
         throw new Error('视频任务失败：' + errMsg);
       }
-      if (st.status === 'succeeded') {
+      if (sts === 'succeeded') {
         videoURL = (st.content && st.content.video_url) || '';
         break;
       }
@@ -957,8 +958,18 @@
     if (!videoURL) throw new Error('视频任务超时（15 分钟）');
     onProgress?.(93);
 
-    /* 取回成片 → dataURL + 首帧封面 */
-    const blob = await (await fetch(videoURL)).blob();
+    /* 取回成片 → dataURL + 首帧封面：带超时与重试（大 MP4 下载偶发卡住会导致界面一直 99%） */
+    let blob = null;
+    for (let a = 0; a < 3 && !blob; a++) {
+      try {
+        const ctl = new AbortController();
+        const tm = setTimeout(() => ctl.abort(), 180000);
+        const resp = await fetch(videoURL, { signal: ctl.signal });
+        blob = resp.ok ? await resp.blob() : null;
+        clearTimeout(tm);
+      } catch (e) { blob = null; }
+    }
+    if (!blob) throw new Error('成片下载失败（网络超时，任务实际已完成）。请重新运行节点，或直接用链接下载：' + videoURL);
     const dataURL = await blobToDataURL(blob);
     let frame = '';
     try { frame = await videoFirstFrame(dataURL); } catch (e) { /* 首帧失败不阻塞 */ }
@@ -1204,18 +1215,29 @@
         } catch (e) { /* 网络抖动：继续轮询 */ }
         if (!st) continue;
         onProgress?.(Math.min(90, 10 + i * 0.5));
-        if (st.status === 'failed') {
+        const sts = String((st && st.status) || '').toLowerCase();
+        if (sts === 'failed') {
           const errMsg = (st.error && (st.error.message || st.error.code)) || '未知原因（费用已自动退款）';
           throw new Error('视频任务失败：' + errMsg);
         }
-        if (st.status === 'succeeded') {
+        if (sts === 'succeeded') {
           videoURL = (st.content && st.content.video_url) || '';
           if (videoURL) break;
         }
       }
       if (!videoURL) throw new Error('视频任务续轮询超时（15 分钟）');
       onProgress?.(93);
-      const blob = await (await fetch(videoURL)).blob();
+      let blob = null;
+      for (let a = 0; a < 3 && !blob; a++) {
+        try {
+          const ctl = new AbortController();
+          const tm = setTimeout(() => ctl.abort(), 180000);
+          const resp = await fetch(videoURL, { signal: ctl.signal });
+          blob = resp.ok ? await resp.blob() : null;
+          clearTimeout(tm);
+        } catch (e) { blob = null; }
+      }
+      if (!blob) throw new Error('成片下载失败（网络超时，任务实际已完成）。请重新运行节点，或直接用链接下载：' + videoURL);
       const dataURL = await blobToDataURL(blob);
       let frame = '';
       try { frame = await videoFirstFrame(dataURL); } catch (e) {}

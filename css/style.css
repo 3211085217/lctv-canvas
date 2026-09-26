@@ -790,18 +790,10 @@ body.linking .port{ pointer-events:auto; }
 .credit-bal b{ color:#d0b88a; font-size:16px; }
 .credit-rate{ font-size:11px; color:var(--text3); background:#222226; border:1px solid var(--line2); padding:1px 8px; border-radius:99px; }
 .credit-qr-tip{ font-size:11.5px; color:var(--text3); margin-top:8px; line-height:1.8; }
-.credit-pay{ background:#141416; border:1px solid var(--line2); border-radius:10px; padding:12px; }
-.credit-pay-row{ display:flex; gap:8px; align-items:center; margin-bottom:10px; }
-.credit-pay-row .mp-input{ flex:1; }
-.credit-type{ flex:none; }
-.credit-type.on{ color:#d0b88a; border-color:rgba(212,168,83,.6); background:rgba(212,168,83,.12); }
-.credit-pay-go{ width:100%; }
-.credit-pay-qr{ margin-top:12px; text-align:center; }
-.credit-pay-qrbox{ display:inline-block; background:#fff; padding:8px; border-radius:10px; }
-.credit-paid{ font-size:14px; color:#7adf9b; padding:14px 0 4px; }
-.credit-divider{ font-size:11px; color:var(--text3); margin:12px 0 8px; text-align:center; position:relative; }
-.credit-divider::before, .credit-divider::after{ content:''; position:absolute; top:50%; width:28%; height:1px; background:var(--line2); }
-.credit-divider::before{ left:0; } .credit-divider::after{ right:0; }
+.credit-qrs{ display:flex; gap:12px; justify-content:center; margin-bottom:6px; }
+.credit-qr{ text-align:center; flex:1; }
+.credit-qr img{ width:170px; height:212px; object-fit:cover; background:#fff; border-radius:10px; border:1px solid var(--line); }
+.credit-qr-label{ font-size:12px; color:var(--text2); margin-top:6px; }
 .credit-row{ display:flex; gap:8px; align-items:center; }
 .credit-row .mp-input{ flex:1; }
 .credit-row .btn{ flex:none; }

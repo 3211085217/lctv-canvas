@@ -92,7 +92,54 @@
       } catch (e) {}
     },
 
-    /* ---------- 充值弹窗 ---------- */
+    /* ---------- 充值弹窗：动态支付码（自动到账）+ 卡密兑换 ---------- */
+    _qrTimer: null,
+    _payType: 'alipay',
+
+    /* 按需加载二维码生成库（失败时降级为跳转链接） */
+    _loadQRLib() {
+      if (this._qrLib) return Promise.resolve(this._qrLib);
+      this._qrLib = new Promise((res) => {
+        if (window.QRCode) return res(true);
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js';
+        s.onload = () => res(true);
+        s.onerror = () => {
+          const s2 = document.createElement('script');
+          s2.src = 'https://lf3-cdn-tos.bytecdntp.com/cdn/expire-1-M/qrcodejs/1.0.0/qrcode.min.js';
+          s2.onload = () => res(true);
+          s2.onerror = () => res(false);
+          document.head.appendChild(s2);
+        };
+        document.head.appendChild(s);
+      });
+      return this._qrLib;
+    },
+
+    /* 轮询支付结果：TRADE_SUCCESS 后余额已由后端自动加好 */
+    _pollOrder(body, m, timerRef) {
+      const box = body;
+      let tries = 0;
+      timerRef.t = setInterval(async () => {
+        tries++;
+        const last = this._lastOrder;
+        if (!last) { clearInterval(timerRef.t); timerRef.t = null; return; }
+        try {
+          const r = await fetch('/api/credit/order?device=' + encodeURIComponent(this.device) + '&out=' + encodeURIComponent(last));
+          const j = await r.json().catch(() => null);
+          if (j && j.status === 'paid') {
+            clearInterval(timerRef.t); timerRef.t = null;
+            this.balance = j.credits;
+            this.render();
+            const qrwrap = U.$('#credit-pay-qrwrap', box);
+            if (qrwrap) qrwrap.innerHTML = `<div class="credit-paid">✅ 支付成功，<b>${j.credits}</b> 积分已到账</div>`;
+            LC.App.toast('支付成功，积分已自动到账', 'ok');
+          }
+        } catch (e) {}
+        if (tries > 120) { clearInterval(timerRef.t); timerRef.t = null; }
+      }, 3000);
+    },
+
     openRecharge() {
       if (this._modalEl) return;
       const priceHtml = Object.entries(this.prices)
@@ -101,31 +148,87 @@
       const m = LC.Modal.open(`
         <div class="credit-box">
           <div class="credit-bal">当前积分：<b id="credit-bal-b">${this.balance}</b><span class="credit-rate">1 元 = 1 积分</span></div>
-          <div class="credit-qrs">
-            <div class="credit-qr">
-              <img src="qrcode_wechat.jpg" alt="微信收款码" onerror="this.style.display='none'">
-              <div class="credit-qr-label">微信支付</div>
+          <div class="credit-pay">
+            <div class="credit-pay-row">
+              <input id="credit-pay-amt" class="mp-input" type="number" min="1" max="500" step="1" value="10" title="充值金额（元）">
+              <button class="btn credit-type on" id="credit-pay-alipay" data-paytype="alipay">支付宝</button>
+              <button class="btn credit-type" id="credit-pay-wxpay" data-paytype="wxpay">微信</button>
             </div>
-            <div class="credit-qr">
-              <img src="qrcode_alipay.jpg" alt="支付宝收款码" onerror="this.style.display='none'">
-              <div class="credit-qr-label">支付宝</div>
-            </div>
+            <button class="btn primary credit-pay-go" id="credit-pay-go">生成支付二维码</button>
+            <div class="credit-pay-qr" id="credit-pay-qrwrap" hidden></div>
+            <div class="credit-qr-tip" id="credit-pay-err"></div>
           </div>
-          <div class="credit-qr-tip">扫码付款后，<b>找我拿卡密</b>，卡密在下方兑换<br>（收款码未显示？把图片放到 <b>web/qrcode_wechat.jpg</b> / <b>web/qrcode_alipay.jpg</b>）</div>
+          <div class="credit-divider">卡密兑换（备用）</div>
           <div class="credit-row">
             <input id="credit-code" class="mp-input" placeholder="输入卡密，如 CARD005-xxxxxxxx-xxxxxxxx" spellcheck="false">
             <button id="credit-redeem" class="btn primary">兑换</button>
           </div>
           <div class="credit-prices">计费：${priceHtml}（价格可调整，以页面显示为准）</div>
         </div>`,
-        { title: `${U.icon('dot', 14)} 积分充值`, width: '460px', maskClose: true });
+        { title: `${U.icon('dot', 14)} 积分充值`, width: '470px', maskClose: true });
       this._modalEl = m;
+      const box = m.body;
       const origClose = m.close;
-      m.close = () => { this._modalEl = null; origClose(); };
-      U.$('#credit-redeem', m.body).onclick = async () => {
-        const code = U.$('#credit-code', m.body).value.trim();
+      m.close = () => {
+        this._modalEl = null;
+        if (this._pollRef && this._pollRef.t) { clearInterval(this._pollRef.t); this._pollRef.t = null; }
+        origClose();
+      };
+      this._pollRef = { t: null };
+      this._lastOrder = null;
+
+      // 支付方式切换
+      U.$$('.credit-type', box).forEach((b) => {
+        b.onclick = () => {
+          this._payType = b.dataset.paytype;
+          U.$$('.credit-type', box).forEach((x) => x.classList.toggle('on', x === b));
+        };
+      });
+
+      // 生成支付码 → 显示二维码 → 轮询到账
+      U.$('#credit-pay-go', box).onclick = async () => {
+        const amt = Number(U.$('#credit-pay-amt', box).value);
+        const errEl = U.$('#credit-pay-err', box);
+        const wrap = U.$('#credit-pay-qrwrap', box);
+        errEl.textContent = '';
+        if (!amt || amt < 1 || amt > 500) { errEl.textContent = '金额需在 1~500 元之间'; return; }
+        const go = U.$('#credit-pay-go', box);
+        go.disabled = true; go.textContent = '下单中…';
+        try {
+          const r = await fetch('/api/credit/epay-order', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device: this.device, money: amt, type: this._payType }),
+          });
+          const j = await r.json().catch(() => null);
+          if (!j) { errEl.innerHTML = '服务器无响应（云端后端未部署时无法自动收款，请改用卡密充值）'; }
+          else if (j.error) { errEl.textContent = j.error; }
+          else {
+            this._lastOrder = j.order;
+            wrap.hidden = false;
+            const okLib = await this._loadQRLib();
+            if (okLib && window.QRCode) {
+              wrap.innerHTML = `
+                <div class="credit-pay-qrbox" id="credit-pay-qr"></div>
+                <div class="credit-qr-tip">打开${this._payType === 'wxpay' ? '微信' : '支付宝'}扫一扫付款，<b>付款成功后积分自动到账</b>（请勿关闭弹窗）</div>`;
+              new window.QRCode(U.$('#credit-pay-qr', box), { text: j.payUrl, width: 180, height: 180, correctLevel: 2 });
+            } else {
+              wrap.innerHTML = `
+                <a class="btn primary" href="${U.esc(j.payUrl)}" target="_blank" rel="noopener">点击打开支付页面 →</a>
+                <div class="credit-qr-tip">支付成功后回到本页，积分自动到账</div>`;
+            }
+            if (this._pollRef.t) clearInterval(this._pollRef.t);
+            this._pollOrder(box, m, this._pollRef);
+          }
+        } catch (e) { errEl.textContent = '网络错误，请重试'; }
+        go.disabled = false; go.textContent = '生成支付二维码';
+      };
+      U.$('#credit-pay-amt', box).onkeydown = (e) => { if (e.key === 'Enter') U.$('#credit-pay-go', box).click(); };
+
+      // 卡密兑换
+      U.$('#credit-redeem', box).onclick = async () => {
+        const code = U.$('#credit-code', box).value.trim();
         if (!code) { LC.App.toast('请先输入卡密', 'warn'); return; }
-        const btn = U.$('#credit-redeem', m.body);
+        const btn = U.$('#credit-redeem', box);
         btn.disabled = true; btn.textContent = '兑换中…';
         try {
           const j = await this._post('/redeem', { device: this.device, code });
@@ -135,15 +238,24 @@
             this.balance = j.credits;
             LC.App.toast(`兑换成功：+${j.added} 积分（当前 ${j.credits}）`, 'ok');
             this.render();
-            U.$('#credit-code', m.body).value = '';
+            U.$('#credit-code', box).value = '';
           }
         } catch (e) { LC.App.toast('兑换失败：' + e.message, 'err'); }
         btn.disabled = false; btn.textContent = '兑换';
         this.refresh();
       };
-      U.$('#credit-code', m.body).onkeydown = (e) => {
-        if (e.key === 'Enter') U.$('#credit-redeem', m.body).click();
+      U.$('#credit-code', box).onkeydown = (e) => {
+        if (e.key === 'Enter') U.$('#credit-redeem', box).click();
       };
+
+      // 支付完跳回页面（return_url 带 ?credit_out=订单号）：打开弹窗时自动查一次
+      const q = new URLSearchParams(location.search);
+      const backOrder = q.get('credit_out');
+      if (backOrder) {
+        this._lastOrder = backOrder;
+        try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) {}
+        this._pollOrder(box, m, this._pollRef);
+      }
     },
   };
 

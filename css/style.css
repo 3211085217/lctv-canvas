@@ -792,7 +792,7 @@ body.linking .port{ pointer-events:auto; }
 .credit-qr-tip{ font-size:11.5px; color:var(--text3); margin-top:8px; line-height:1.8; }
 .credit-qrs{ display:flex; gap:12px; justify-content:center; margin-bottom:6px; }
 .credit-qr{ text-align:center; flex:1; }
-.credit-qr img{ width:170px; height:212px; object-fit:cover; background:#fff; border-radius:10px; border:1px solid var(--line); }
+.credit-qr img{ width:180px; height:180px; object-fit:contain; background:#fff; border-radius:10px; border:1px solid var(--line); }
 .credit-qr-label{ font-size:12px; color:var(--text2); margin-top:6px; }
 .credit-row{ display:flex; gap:8px; align-items:center; }
 .credit-row .mp-input{ flex:1; }

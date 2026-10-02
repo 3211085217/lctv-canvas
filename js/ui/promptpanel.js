@@ -44,14 +44,14 @@
         if (this._dropPop && this._dropPop.contains(e.target)) return;                // 点下拉菜单：保留
         LC.App.nodes.select([]);                                // 其他任何地方 → 隐藏
       }, true);
-      // Alt+V 切换语音输入（网页版无本地语音服务，仅提示）
+      // Alt+V 切换语音输入（面板可见且绑定节点时生效）
       document.addEventListener('keydown', (e) => {
         if (!e.altKey) return;
         if (e.key !== 'v' && e.key !== 'V' && e.code !== 'KeyV') return;
         if (!this.el || this.el.hidden) return;
         if (!this.node) return;
         e.preventDefault();
-        if (LC.App && LC.App.toast) LC.App.toast('网页版暂不支持语音输入', 'warn');
+        this.toggleVoice(this.node);
       });
     },
 
@@ -221,6 +221,7 @@
           <div class="pp-input-wrap">
             <div class="pp-input" contenteditable="true" spellcheck="false" data-ppprop="prompt"
               data-placeholder="${isImg ? '可直接文字生图，或上传图片输入文字指令对图片进行编辑，如：将背景改为雪夜' : '视频内容描述（动作/运镜/氛围）… 输入 @ 可引用其他节点'}">${LC.Mention.textToHTML(p.prompt || '')}</div>
+            <button class="pp-voice" data-ppact="voice" title="语音输入（Alt+V 开始 / 再按结束）">${U.icon('mic', 14)}</button>
           </div>
           <div class="pp-bar">
             <div class="pp-bar-left">
@@ -262,9 +263,13 @@
           <div class="pp-input-wrap">
             <div class="pp-input" contenteditable="true" spellcheck="false" data-ppprop="${cfg.promptProp}"
               data-placeholder="${cfg.placeholder}">${LC.Mention.textToHTML(p[cfg.promptProp] || '')}</div>
+            <button class="pp-voice" data-ppact="voice" title="语音输入（Alt+V 开始 / 再按结束）">${U.icon('mic', 14)}</button>
           </div>
           <div class="pp-bar">
-            <div class="pp-bar-left">${modelOpts()}</div>
+            <div class="pp-bar-left">
+              ${cfg.modelKind === 'tts' ? `<button class="pp-tag" data-ppact="upaudio" title="上传本地音频文件"><span class="pp-plus">+</span>上传音频</button>` : ''}
+              ${modelOpts()}
+            </div>
             <div class="pp-bar-right">
               <button class="pp-run" data-ppact="run" title="生成">${U.icon('arrow-up', 15)}</button>
             </div>
@@ -371,14 +376,11 @@
       } else if (prop === 'count') {
         items = [1, 2, 4].map((v) => ({ v, label: v + '张', on: Number(n.props.count || 1) === v }));
       } else if (prop === 'resolution') {
-        // 视频节点：按当前选的模型动态显示支持的分辨率档位（与节点本体下拉保持一致）
-        const mn = n.props.model || '';
-        let opts;
-        if (/viduq3/i.test(mn)) opts = ['540P', '720P', '1080P'];
-        else if (/minimax.*h3|^h3|H3$/i.test(mn)) opts = ['720P', '2K'];
-        else if (/seedance.*2\.5|seedance-2-5/i.test(mn)) opts = ['480P', '720P', '1080P'];
-        else if (/seedance/i.test(mn)) opts = ['480P', '720P', '1080P', '4K'];
-        else opts = ['720P', '1080P', '2K'];
+        // 视频节点：分辨率档位统一取自 NodeView.videoResolutions（与节点本体下拉同源，避免两处各写一份）
+        const vRes = (LC.NodeView && LC.NodeView.videoResolutions)
+          ? LC.NodeView.videoResolutions(n.props.model || '')
+          : [];
+        const opts = vRes.map((r) => r[0]);
         items = opts.map((v) => ({ v, label: v, on: (n.props.resolution || opts[0]) === v }));
       }
       if (!items.length) return;
@@ -483,6 +485,7 @@
         else if (a === 'lastframe') { LC.NodeUpload?.pickLast(n); }
         else if (a === 'refvid') { LC.NodeUpload?.pickRefVideos(n); }
         else if (a === 'refaud') { LC.NodeUpload?.pickRefAudios(n); }
+        else if (a === 'upaudio') { LC.NodeUpload?.pickAudio(n); }
         else if (a === 'tag') {
           LC.Modal.prompt('添加标记', n.props.tag || '').then((v) => {
             if (v != null) { n.props.tag = v; LC.App.saveSoon(); }

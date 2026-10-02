@@ -292,6 +292,13 @@
           const visible = (n.x + n.w) >= minX && n.x <= maxX && (n.y + nh) >= minY && n.y <= maxY;
           const want = visible ? '' : 'none';
           if (el.style.display !== want) { el.style.display = want; changed = true; }
+          // 懒加载媒体：仅视口内可见节点才真正加载图片（避免一次性下载全部图片导致启动卡顿）
+          if (visible) {
+            el.querySelectorAll('img[data-src]').forEach((m) => {
+              m.src = m.dataset.src;
+              m.removeAttribute('data-src');
+            });
+          }
         });
         // 节点显隐变化后刷新边（视口外的边仍会绘制，端口位置由缓存偏移+世界坐标算出）
         if (changed && LC.App.edges) LC.App.edges.refresh();

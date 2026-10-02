@@ -369,12 +369,16 @@
           const mode = (p.mode === 'shouweizhen' || p.mode === 'i2v') ? 'shouweizhen' : 'cankaosheng';
           const upVids = (inp.videos || []).map((v) => v && (v._dataURL || v.dataURL)).filter(Boolean);
           const upAuds = (inp.audio || []).map((a) => a && (a._dataURL || a.dataURL || a.data)).filter(Boolean);
-          // 首尾帧：本地槽位优先（内存 data 优先，磁盘 url 转 dataURL 回退），其次上游图片
+          // 首尾帧：只用本地手动上传的首帧/尾帧，不掺入上游连线图片（首尾帧语义固定为首帧+尾帧）
           const ffRaw = p.firstFrameData || p.firstFrame || p.localFrame || '';
           const lfRaw = p.lastFrameData || p.lastFrame || '';
           const ff = ffRaw ? await U.urlToDataURL(ffRaw) : null;   // /assets/ URL → base64
           const lf = lfRaw ? await U.urlToDataURL(lfRaw) : null;
-          const swImgs = [ff, lf, ...(inp.images || [])].filter(Boolean).slice(0, 2);
+          // H3 尾帧必须与首帧同传，只传尾帧会被平台当首帧或 400，这里提前拦截
+          if (mode === 'shouweizhen' && lf && !ff) {
+            throw new Error('首尾帧模式：已上传尾帧但缺少首帧，请同时上传首帧，或切换到「参考生」模式');
+          }
+          const swImgs = [ff, lf].filter(Boolean).slice(0, 2);
           // 参考生：本地槽位 + 上游图/视频/音频合并（slotData 与 collect 已过滤 null）
           const isVidu = /viduq3/i.test(p.model || '');
           const isSeed = /seedance/i.test(p.model || '');

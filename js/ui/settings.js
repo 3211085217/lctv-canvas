@@ -11,7 +11,7 @@
     videoModels: [],
     textModels: [],
     ttsModels: [],
-    autoRerun: true,
+    autoRerun: false,
   };
 
   /* 预置模型（含内置 Key，直接开箱即用；name 为前端显示名，modelId 为实际请求模型） */
@@ -24,7 +24,7 @@
     ],
     video: [
       { name: 'viduq3-turbo 全能参考', provider: 'openai', modelId: 'viduq3-turbo-cankaosheng', url: 'https://api.lk888.ai/v1', key: 'sk-54dc77a3432e80f23940bd47ff8ff5495fb46a27d11c5ab6', resolutions: ['540P', '720P', '1080P'] },
-      { name: 'MiniMax H3', provider: 'openai', modelId: 'minimax-h3', url: 'https://api.lk888.ai/v1', key: 'sk-f8ea02bf9b4e5ce2eae978b4e3bcf1dc584ff042c1557841', resolutions: ['720P', '2K'] },
+      { name: 'MiniMax H3', provider: 'openai', modelId: 'minimax-h3', url: 'https://api.lk888.ai/v1', key: 'sk-f8ea02bf9b4e5ce2eae978b4e3bcf1dc584ff042c1557841', resolutions: ['768P', '1080P', '2K', '4K'] },
       { name: 'seedance 2.0', provider: 'ark', modelId: 'doubao-seedance-2-0-260128', url: 'https://api.lk888.ai/api/v3/anmiao', key: 'sk-23ab50ed44c0fe89c44d63728dd3b857a5158fe906f50396', resolutions: ['480P', '720P', '1080P', '4K'] },
       { name: 'seedance 2.0 fast', provider: 'ark', modelId: 'doubao-seedance-2-0-fast-260128', url: 'https://api.lk888.ai/api/v3/anmiao', key: 'sk-15eb8f58fccbbe00c464c2487e712b7a6a263cf48fa7aa02', resolutions: ['480P', '720P'] },
       { name: 'seedance 2.0 mini', provider: 'ark', modelId: 'doubao-seedance-2-0-mini-260615', url: 'https://api.lk888.ai/api/v3/anmiao', key: 'sk-90885a6da70a05728c0f733b416aa8394c2040064f32520b', resolutions: ['480P', '720P'] },

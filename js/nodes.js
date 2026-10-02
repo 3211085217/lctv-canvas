@@ -25,12 +25,12 @@
   const PANE_TYPES = ['text', 'audio', 'script', 'subtitle'];
 
   /* 按当前选的视频模型查支持的分辨率档位；未声明则回退 VIDEO_RESOLUTIONS
-   * 不同模型支持的档位不同（H3：720P/2K；Vidu Q3：540P/720P/1080P；Seedance：480P/720P/1080P） */
+   * 不同模型支持的档位不同（H3：768P/1080P/2K/4K；Vidu Q3：540P/720P/1080P；Seedance：480P/720P/1080P） */
   function videoResolutions(modelName) {
     if (!modelName) return VIDEO_RESOLUTIONS;
     // 硬编码已知模型（与 settings.js 预置同步，防止 localStorage 同步异常时仍能正确显示）
     if (/viduq3/i.test(modelName)) return [['540P', '540P'], ['720P', '720P'], ['1080P', '1080P']];
-    if (/minimax.*h3|^h3|H3$/i.test(modelName)) return [['720P', '720P'], ['2K', '2K']];
+    if (/minimax.*h3|^h3|H3$/i.test(modelName)) return [['768P', '768P'], ['1080P', '1080P'], ['2K', '2K'], ['4K', '4K']];
     if (/seedance.*2\.5|seedance-2-5/i.test(modelName)) return [['480P', '480P'], ['720P', '720P'], ['1080P', '1080P']];
     if (/seedance.*fast|seedance.*mini/i.test(modelName)) return [['480P', '480P'], ['720P', '720P']];
     if (/seedance/i.test(modelName)) return [['480P', '480P'], ['720P', '720P'], ['1080P', '1080P'], ['4K', '4K']];
@@ -405,7 +405,7 @@
             }
             const tag = p.localURL && cover === p.localURL ? '<span class="cover-tag">本地图片</span>' : '';
             const zoomBtn = '<button class="n-zoom" data-zoom="image" title="放大查看">⛶</button>';
-            body = `<div class="n-preview"><img src="${cover}" draggable="false" decoding="async" alt="">${grid}${tag}${zoomBtn}</div>`;
+            body = `<div class="n-preview"><img data-src="${cover}" draggable="false" decoding="async" alt="">${grid}${tag}${zoomBtn}</div>`;
           } else {
             const ph = p.mode === 'grid' ? '九宫格生成 · 在下方输入分镜提示词' : p.mode === 'tri' ? '三视图生成 · 在下方输入提示词' : '可直接文字生图，或上传图片输入指令编辑';
             const sceneIc = `<svg class="ph-scene" viewBox="0 0 32 32" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="22" cy="9" r="3.2"/><path d="M4 24 L11 13 L16 19 L20 15 L28 24 Z"/></svg>`;
@@ -427,11 +427,11 @@
             const isLocal = o.meta?.mode === '本地视频';
             const zoomBtn = '<button class="n-zoom" data-zoom="video" title="放大查看">⛶</button>';
             const poster = (o.frames && o.frames[0]) || '';
-            body = `<div class="n-preview"><video src="${o.dataURL}" class="n-video" controls preload="metadata" playsinline${poster ? ` poster="${poster}"` : ''}></video>
+            body = `<div class="n-preview"><video src="${o.dataURL}" class="n-video" controls preload="none" playsinline${poster ? ` poster="${poster}"` : ''}></video>
               <span class="dur-badge">${o.duration}s</span>${zoomBtn}</div>
               <div class="n-desc">${isLocal ? '本地视频' : U.esc(o.meta?.mode || 'AI 视频')} · ${U.esc(o.meta?.model || '')}</div>`;
           } else if (o && o.frames && o.frames[0]) {
-            body = `<div class="n-preview"><img src="${o.frames[0]}" class="kenburns" draggable="false" decoding="async" alt="">
+            body = `<div class="n-preview"><img data-src="${o.frames[0]}" class="kenburns" draggable="false" decoding="async" alt="">
               <span class="dur-badge">${o.duration}s</span></div>
               <div class="n-desc">${U.esc((o.meta?.mode || '视频') + ' · ' + (o.meta?.model || ''))}</div>`;
           } else if (p.firstFrame || p.lastFrame || p.localFrame || (p.refImages && p.refImages.length) || (p.refVideos && p.refVideos.length) || (p.refAudios && p.refAudios.length)) {
@@ -443,7 +443,7 @@
             if (p.refImages && p.refImages.length) tags.push('参考图×' + p.refImages.length);
             if (p.refVideos && p.refVideos.length) tags.push('参考视频×' + p.refVideos.length);
             if (p.refAudios && p.refAudios.length) tags.push('参考音频×' + p.refAudios.length);
-            body = `<div class="n-preview">${img ? `<img src="${img}" draggable="false" decoding="async" alt="">` : `<div class="ph">参考素材已就绪</div>`}<span class="cover-tag">${U.esc(tags.join(' · '))}</span></div>`;
+            body = `<div class="n-preview">${img ? `<img data-src="${img}" draggable="false" decoding="async" alt="">` : `<div class="ph">参考素材已就绪</div>`}<span class="cover-tag">${U.esc(tags.join(' · '))}</span></div>`;
           } else {
             body = `<div class="n-preview"><div class="ph">点击输入提示词 · 文/图生视频</div></div>`;
           }
@@ -462,7 +462,7 @@
           return `<div class="n-preview"><div class="ph">${U.icon('script', 18)}<div class="ph-txt">粘贴剧本 → 生成分镜</div></div></div>`;
         }
         case 'stage': {
-          if (o && o.dataURL) return `<div class="n-preview"><img src="${o.dataURL}" decoding="async" alt=""></div>`;
+          if (o && o.dataURL) return `<div class="n-preview"><img data-src="${o.dataURL}" decoding="async" alt=""></div>`;
           return `<div class="n-preview" style="min-height:90px"><div class="ph">${U.icon('stage', 20)} 双击进入导演台<br>摆放人物 → 截图输出</div></div>`;
         }
         case 'subtitle': {
@@ -1082,6 +1082,17 @@
       const n = this.graph.getNode(id);
       if (!n) return;
       this.renderNode(n);
+      this.loadMedia(n);
+    }
+
+    /* 懒加载节点图片：仅节点可见时才真正写入 src（视口外跳过，viewportCull 进入视口时再加载） */
+    loadMedia(n) {
+      const el = this.els.get(n.id);
+      if (!el || el.style.display === 'none') return;
+      el.querySelectorAll('img[data-src]').forEach((m) => {
+        m.src = m.dataset.src;
+        m.removeAttribute('data-src');
+      });
     }
 
     /* ---------- 图片节点 · 预设弹出菜单（生图/三视图/九宫格/参考图/逆向解析） ---------- */

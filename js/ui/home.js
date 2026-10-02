@@ -211,6 +211,8 @@
       const list = await this.list();
       const container = U.$('#home-canvas-list');
       const empty = U.$('#home-empty');
+      const countEl = U.$('#home-count');
+      if (countEl) countEl.textContent = String(list.length);
       if (!list.length) {
         container.innerHTML = '';
         empty.hidden = false;
@@ -218,34 +220,57 @@
       }
       empty.hidden = true;
       container.innerHTML = list.map((c) => `
-        <div class="hc-card" data-id="${c.id}">
-          <div class="hc-thumb">${U.icon('grid', 28)}</div>
-          <div class="hc-info">
-            <div class="hc-name">${U.esc(c.name)}</div>
+        <div class="hc-card" data-id="${c.id}" role="listitem">
+          <div class="hc-cover">
+            <svg class="hc-figure" viewBox="0 0 150 66" fill="none" aria-hidden="true">
+              <path d="M26 46 C 46 46, 42 22, 66 22" stroke="#3a3a43" stroke-width="1.4"/>
+              <path d="M66 22 C 90 22, 86 46, 124 46" stroke="#3a3a43" stroke-width="1.4"/>
+              <circle cx="26" cy="46" r="11" fill="#1b1b20" stroke="#484851" stroke-width="1.3"/>
+              <circle cx="66" cy="22" r="11" fill="#1b1b20" stroke="#484851" stroke-width="1.3"/>
+              <circle cx="124" cy="46" r="11" fill="#1b1b20" stroke="#484851" stroke-width="1.3"/>
+              <circle cx="26" cy="46" r="2.8" fill="#e0954a"/>
+              <circle cx="66" cy="22" r="2.8" fill="#e8e6e3"/>
+              <circle cx="124" cy="46" r="2.8" fill="#d7c49a"/>
+            </svg>
+          </div>
+          <div class="hc-card-body">
+            <div class="hc-name" title="${U.esc(c.name)}">${U.esc(c.name)}</div>
             <div class="hc-meta">更新于 ${U.esc(c.updatedAt || c.createdAt)}</div>
           </div>
           <div class="hc-actions">
-            <button class="hc-btn primary" data-open>${U.icon('play', 13)} 打开</button>
-            <button class="hc-btn" data-rename>${U.icon('pen', 13)} 重命名</button>
-            <button class="hc-btn danger" data-del>${U.icon('trash', 13)} 删除</button>
+            <button class="hc-btn primary" data-open>打开</button>
+            <button class="hc-btn" data-rename title="重命名">${U.icon('pen', 13)}</button>
+            <button class="hc-btn danger" data-del title="删除">${U.icon('trash', 13)}</button>
           </div>
         </div>
       `).join('');
       // 绑定事件
-      U.$$('.hc-card', container).forEach((card) => {
-        const id = card.dataset.id;
-        card.querySelector('[data-open]').onclick = () => this.open(id);
-        card.querySelector('[data-rename]').onclick = async () => {
+      U.$$('.hc-card', container).forEach((row) => {
+        const id = row.dataset.id;
+        row.querySelector('[data-open]').onclick = () => this.open(id);
+        row.querySelector('[data-rename]').onclick = async () => {
           const c = (await this.list()).find((x) => x.id === id);
           const name = await LC.Modal.prompt('重命名画布', c?.name || '', { className: 'home-prompt' });
           if (name) { await this.rename(id, name); LC.App.toast('已重命名', 'ok'); }
         };
-        card.querySelector('[data-del]').onclick = async () => {
+        row.querySelector('[data-del]').onclick = async () => {
           const c = (await this.list()).find((x) => x.id === id);
           if (await LC.Modal.confirm('删除画布', `确定删除「${c?.name}」？此操作不可撤销。`)) {
             this.del(id);
           }
         };
+        // 双击卡片 = 打开
+        row.addEventListener('dblclick', () => this.open(id));
+        // 卡片 3D 倾斜 + 光斑（跟手倾斜，科技感但不霓虹）
+        row.addEventListener('mousemove', (e) => {
+          const r = row.getBoundingClientRect();
+          const px = (e.clientX - r.left) / r.width;
+          const py = (e.clientY - r.top) / r.height;
+          row.style.setProperty('--mx', (e.clientX - r.left) + 'px');
+          row.style.setProperty('--my', (e.clientY - r.top) + 'px');
+          row.style.transform = `perspective(900px) rotateX(${((0.5 - py) * 12).toFixed(2)}deg) rotateY(${((px - 0.5) * 16).toFixed(2)}deg) translateY(-4px)`;
+        });
+        row.addEventListener('mouseleave', () => { row.style.transform = ''; });
       });
     },
 
@@ -257,6 +282,12 @@
       U.$('#topbar').style.display = 'none';
       U.$('#workspace').style.display = 'none';
       U.hydrateIcons(hv);
+      // 空状态「开始创作」按钮 → 新建画布（只绑定一次）
+      const emptyNew = U.$('#home-empty-new');
+      if (emptyNew && !emptyNew.dataset.bound) {
+        emptyNew.dataset.bound = '1';
+        emptyNew.onclick = () => this.newCanvas();
+      }
       this.render();
     },
     hide() {
@@ -303,6 +334,13 @@
         logo.addEventListener('click', (e) => {
           e.stopPropagation();
           this.back();
+        });
+      }
+      // 背景光晕跟随鼠标（柔和的暖光，缓慢漂移）
+      const glow = U.$('#home-glow');
+      if (glow) {
+        window.addEventListener('mousemove', (e) => {
+          glow.style.transform = `translate(${e.clientX - 310}px, ${e.clientY - 310}px)`;
         });
       }
     },

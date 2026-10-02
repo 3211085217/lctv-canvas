@@ -44,7 +44,7 @@
   let _curAiTaskId = null;   // AI.run 当前前端任务 ID（供协议函数挂接第三方信息）
   function noteExtTask(ext) {
     if (!_curAiTaskId) return;
-    // 网页版：同步挂到运行中节点 → 随画布持久化，刷新后续轮询原任务
+    // 同步挂到运行中节点 → 随工程持久化，刷新后续轮询原任务（双保险：serve.py 重启任务表丢失也能恢复）
     if (window.LC && LC.__onExtTask) LC.__onExtTask(ext);
     aiTaskSync('meta', { task_id: _curAiTaskId, ext });
   }
@@ -300,20 +300,118 @@
   }
 
   /* 把 base64 dataURL 转成公网 URL（Seedance/H3 等模型要求素材必须是公网可访问 URL，不支持 base64 内联）。
-     已是 http(s) 公网链接则原样返回；否则上传到云端数据仓库拿 raw 直读 URL。
+     已是 http(s) 公网链接则原样返回；否则 POST 到本地 /api/upload 上传到 catbox.moe 拿永久 URL。
      带缓存：同一 base64 只上传一次。 */
   const _urlCache = new Map();
-  async function toPublicUrl(dataURL) {
+
+  /* =====================================================
+   * 视频参考图 10MB 上限自动压缩（MiniMax H3 报 image_url 文件过大）
+   * 原则：不损坏画质——原图已达标则原样返回（零损耗）；超限才重编码，
+   * 从「视觉无损」档（WebP/JPEG q=1.0）开始，质量只降到"刚好 ≤10MB"为止，
+   * 绝不无谓压狠、绝不放大、绝不主动缩分辨率。结果带缓存（同图同限只压一次）。
+   * ===================================================== */
+  const IMG_LIMIT = 10 * 1024 * 1024;              // 10MB（与 MiniMax H3 上限一致）
+  const _imgCap = new Map();                        // 'url|limit' -> dataURL
+  let _webpOK = null;
+  function webpSupported() {
+    if (_webpOK == null) {
+      try { _webpOK = document.createElement('canvas').toDataURL('image/webp').startsWith('data:image/webp'); }
+      catch (e) { _webpOK = false; }
+    }
+    return _webpOK;
+  }
+  function dataURLBytes(d) {
+    const i = d.indexOf(',');
+    const b64 = d.length - i - 1;
+    return Math.floor(b64 * 3 / 4) - (d.endsWith('==') ? 2 : d.endsWith('=') ? 1 : 0);
+  }
+  function loadImg(d) {
+    return new Promise((res, rej) => {
+      const im = new Image();
+      im.onload = () => res(im);
+      im.onerror = () => rej(new Error('图片加载失败'));
+      im.src = d;
+    });
+  }
+  function encodeTo(img, mime, q) {
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const x = c.getContext('2d');
+    x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
+    x.drawImage(img, 0, 0);
+    return c.toDataURL(mime, q);
+  }
+  /* 返回解码体积 ≤ limit 的 dataURL（保留原尺寸；可能换成 WebP/JPEG）。
+   * src 为 http(s) 公网链接时无法本地压缩，原样返回。 */
+  async function ensureImageUnderLimit(src, limit = IMG_LIMIT) {
+    if (!src || !src.startsWith('data:')) return src;            // 非内联 base64：原样
+    if (dataURLBytes(src) <= limit) return src;                  // 已达标：零损耗，原样
+    const key = limit + '|' + src;
+    const cached = _imgCap.get(key);
+    if (cached) return cached;
+    const img = await loadImg(src);
+    const target = limit - 16384;                                 // 留 16KB 余量：服务端"解码后"校验也稳过
+    const mime = webpSupported() ? 'image/webp' : 'image/jpeg';
+    const from = src.length / 1024 | 0;
+    let best = null;                                              // {q, dataURL}
+    // 1) 视觉无损档起步：q=1.0 先试，行就是它
+    let d1 = encodeTo(img, mime, 1.0);
+    if (dataURLBytes(d1) <= target) best = { q: 1, dataURL: d1 };
+    // 2) 否则从 0.95 往下找第一个达标档
+    let failQ = 1;
+    if (!best) {
+      for (const q of [0.95, 0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.6, 0.55, 0.5, 0.45, 0.4]) {
+        const d = encodeTo(img, mime, q);
+        if (dataURLBytes(d) <= target) { best = { q, dataURL: d }; failQ = q; break; }
+      }
+    }
+    // 3) 在「不达标档」与「实测达标档」之间二分上探，把质量顶到"刚刚好"
+    if (best && best.q < 1) {
+      let lo = failQ, hi = best.q;
+      for (let i = 0; i < 4; i++) {
+        const mq = Math.round((lo + hi) / 2 * 100) / 100;
+        if (mq === lo || mq === hi) break;
+        const d = encodeTo(img, mime, mq);
+        if (dataURLBytes(d) <= target) hi = mq; else lo = mq;
+      }
+      if (hi !== best.q) best = { q: hi, dataURL: encodeTo(img, mime, hi) };
+    }
+    if (!best) {
+      // 极端大图：质量到底仍超限 → 才降一次分辨率（半尺寸），保住画质优先
+      const half = document.createElement('canvas');
+      half.width = Math.max(64, img.naturalWidth >> 1);
+      half.height = Math.max(64, img.naturalHeight >> 1);
+      const x = half.getContext('2d');
+      x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
+      x.drawImage(img, 0, 0, half.width, half.height);
+      for (const q of [0.9, 0.8, 0.7, 0.6]) {
+        const d = half.toDataURL(mime, q);
+        if (dataURLBytes(d) <= target) { best = { q, dataURL: d, shrink: true }; break; }
+      }
+    }
+    if (!best) {
+      console.warn('[图片压缩] 无法压缩到 10MB 以内:', from, 'KB');
+      return src;
+    }
+    _imgCap.set(key, best.dataURL);
+    const to = best.dataURL.length / 1024 | 0;
+    console.log(`[图片压缩] ${from}KB → ${to}KB (q=${best.q}${best.shrink ? ' 半尺寸' : ''})`);
+    return best.dataURL;
+  }
+  async function toPublicUrl(dataURL, opts = {}) {
     if (!dataURL) return '';
     if (/^https?:\/\//i.test(dataURL)) return dataURL;   // 已是公网 URL
     const cached = _urlCache.get(dataURL);
     if (cached) return cached;
+    // 网页版：上传到云端数据仓库拿 raw 直读 URL（无本地 /api/upload）
     try {
       const url = (window.LC && LC.Cloud) ? await LC.Cloud.toPublicUrl(dataURL) : '';
       if (url && /^https?:\/\//i.test(url)) { _urlCache.set(dataURL, url); return url; }
+      if (opts.required) throw new Error('素材上传公网图床失败，无法生成');
       console.warn('[toPublicUrl] 上传失败，回退用原 dataURL');
-      return dataURL;   // 上传失败回退用原 base64（部分模型可能仍接受）
+      return dataURL;
     } catch (e) {
+      if (opts.required) throw e;
       console.warn('[toPublicUrl] 上传异常:', e.message);
       return dataURL;
     }
@@ -448,7 +546,11 @@
     let res;
     if (params.image) {
       // 有参考图 → 走 /images/edits（图生图/编辑端点）
-      const imgUrl = params.image;
+      let imgUrl = params.image;
+      // 超大内联图（服务端单文件上限 10MB）：转公网 URL 直链传入，零压缩、零画质/像素损失
+      if (/^data:/i.test(imgUrl) && dataURLBytes(imgUrl) > IMG_LIMIT) {
+        imgUrl = await toPublicUrl(imgUrl, { required: true });
+      }
       if (/^data:/i.test(imgUrl)) {
         // data: 内联 base64 → 转 Blob → multipart 文件上传
         const { blob, ext } = dataURLtoBlob(imgUrl);
@@ -673,6 +775,12 @@
       // tt-image-2：画质由用户手动选（high/medium/low），默认 high，明确不自动
       pv.quality = params.imgQuality || 'high';
     }
+    // 超 10MB 的内联图压缩到 ≤10MB（视觉无损优先、分辨率/像素尺寸不变；公网上游常收不到故内联压缩）
+    for (let i = 0; i < refImgs.length; i++) {
+      if (/^data:/i.test(refImgs[i])) {
+        refImgs[i] = await ensureImageUnderLimit(refImgs[i], IMG_LIMIT);
+      }
+    }
     if (refImgs.length) pv.images = refImgs;
 
     console.log('[lk888MediaImage] model=%s isTt25=%s images=%d',
@@ -769,13 +877,15 @@
       pv.duration = String(Math.min(16, Math.max(3, Number(params.duration) || 5)));
       // ViduQ3 的 images 本身就是参考图（无首尾帧语义），合并 refImages + images 以防任一模式漏图
       const vImgs = [...(params.refImages || []), ...(params.images || [])].filter(Boolean);
-      if (vImgs.length) pv.images = vImgs.slice(0, 7);
+      if (vImgs.length) pv.images = await Promise.all(vImgs.slice(0, 7).map((x) => ensureImageUnderLimit(x)));
     } else {
       // H3 / Seedance 全形态：mode + image_url / video_url / audio_url；首尾帧用 images
       const resMap = isSeed
         ? { '480P': '480p', '720P': '720p', '1080P': '1080p', '4K': '4K' }
-        : { '720P': '768P', '768P': '768P', '1080P': '1080P', '2K': '2K', '4K': '4K' };
-      pv.resolution = resMap[params.resolution] || (isSeed ? '720p' : '768P');
+        : { '720P': '768P' };   // H3：旧数据 720P 兜底转 768P，其余按接口文档枚举直接透传
+      pv.resolution = isSeed
+        ? (resMap[params.resolution] || '720p')
+        : (resMap[params.resolution] || params.resolution || '768P');
       pv.aspect_ratio = params.aspect || 'adaptive';
       pv.duration = String(Math.min(maxDur, Math.max(4, Number(params.duration) || 5)));
 
@@ -783,18 +893,19 @@
       const refImgs = (params.refImages || []).filter(Boolean);
       if (mode === 'shouweizhen') {
         pv.mode = 'shouweizhen';
-        if (ffImgs.length) pv.images = ffImgs.slice(0, 2);   // 第 1 张首帧、第 2 张尾帧
+        if (ffImgs.length) pv.images = await Promise.all(ffImgs.slice(0, 2).map((x) => ensureImageUnderLimit(x)));   // 第 1 张首帧、第 2 张尾帧
       } else if (mode === 'cankaosheng') {
-        pv.mode = 'cankaosheng';
-        if (refImgs.length) pv.image_url = refImgs.slice(0, capImg);
+        if (refImgs.length) pv.image_url = await Promise.all(refImgs.slice(0, capImg).map((x) => ensureImageUnderLimit(x)));
         const refVids = await Promise.all((params.refVideos || []).map(toPublicUrl));
         const vids = refVids.filter(Boolean).slice(0, capVid);
         if (vids.length) pv.video_url = vids;
         const auds = (params.refAudios || []).filter(Boolean).slice(0, capAud);
         if (auds.length) pv.audio_url = auds;
+        // 仅有参考素材时才标 cankaosheng；纯文生不传 mode（对齐接口文档纯文生示例）
+        if (refImgs.length || vids.length || auds.length) pv.mode = 'cankaosheng';
       } else {
         /* 纯文生（t2v）：正常不带素材；若意外带回参考图也绝不丢图，按参考生处理 */
-        if (refImgs.length) { pv.mode = 'cankaosheng'; pv.image_url = refImgs.slice(0, capImg); }
+        if (refImgs.length) { pv.mode = 'cankaosheng'; pv.image_url = await Promise.all(refImgs.slice(0, capImg).map((x) => ensureImageUnderLimit(x))); }
       }
     }
 
@@ -885,31 +996,45 @@
     const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.key };
     const is25 = /seedance.*2\.5|seedance-2-5/i.test(String(cfg.modelId || ''));
     onProgress?.(3);
-    /* 火山方舟格式：图片/音频支持 data:base64 内联直传（免图床中转，杜绝图床被墙/过期导致参考图丢失）；
-       视频不支持 base64，必须公网 URL，故只有参考视频走 toPublicUrl 转直链。 */
+    /* 火山方舟 Ark content 协议：所有媒体素材（参考图/首尾帧/视频）只认公网 URL，
+       参考图若以 data:base64 内联传入会被上游判定为「没有参考素材」（报 至少需要1个参考素材），
+       故参考图/首尾帧也必须走 toPublicUrl 转直链（与参考视频一致）；音频保持内联。 */
     const mode = (params.mode === 'shouweizhen' || params.mode === 'i2v') ? 'shouweizhen' : 'cankaosheng';
     const imgsFF = (mode === 'shouweizhen' ? (params.images || []).slice(0, 2) : []).filter(Boolean);
     const imgsRF = (mode === 'cankaosheng' ? (params.refImages || []).slice(0, 30) : []).filter(Boolean);
     const audsRF = (mode === 'cankaosheng' ? (params.refAudios || []).slice(0, 10) : []).filter(Boolean);
-    const vidsRF = await Promise.all((mode === 'cankaosheng' ? (params.refVideos || []).slice(0, 10) : []).map(toPublicUrl));
+    const [ffUrls, rfUrls, vidsRF] = await Promise.all([
+      Promise.all(imgsFF.map((u) => toPublicUrl(u, { required: true }))),
+      Promise.all(imgsRF.map((u) => toPublicUrl(u, { required: true }))),
+      Promise.all((mode === 'cankaosheng' ? (params.refVideos || []).slice(0, 10) : []).map((u) => toPublicUrl(u, { required: true }))),
+    ]);
+    const ffOK = ffUrls.filter(Boolean), rfOK = rfUrls.filter(Boolean), vidsOK = vidsRF.filter(Boolean);
     /* 组装 content 数组：text + first_frame/last_frame + reference_image/video/audio */
     const content = [];
-    const prompt = [params.prompt || '', ...stylePrompts(params)].filter(Boolean).join('\n');
+    let prompt = [params.prompt || '', ...stylePrompts(params)].filter(Boolean).join('\n');
+    // 教程要求：素材要在提示词里用 @图像N 引用（"未指定的素材可能被忽略"）；
+    // 用户未写 @图像 时自动补一句，让参考图真正生效
+    if (mode === 'cankaosheng' && rfOK.length && !/@图像|@image/i.test(prompt)) {
+      const refs = rfOK.map((_, i) => `@图像${i + 1}`).join('、');
+      prompt = (prompt ? prompt + '\n' : '') + `以参考图（${refs}）作为角色/画面参考`;
+    }
     if (prompt) content.push({ type: 'text', text: prompt });
-    if (mode === 'shouweizhen' && imgsFF.length) {
-      content.push({ type: 'image_url', role: 'first_frame', image_url: { url: imgsFF[0] } });
-      if (imgsFF.length > 1 && imgsFF[1]) {
-        content.push({ type: 'image_url', role: 'last_frame', image_url: { url: imgsFF[1] } });
+    if (mode === 'shouweizhen' && ffOK.length) {
+      content.push({ type: 'image_url', role: 'first_frame', image_url: { url: ffOK[0] } });
+      if (ffOK.length > 1 && ffOK[1]) {
+        content.push({ type: 'image_url', role: 'last_frame', image_url: { url: ffOK[1] } });
       }
     }
     if (mode === 'cankaosheng') {
-      imgsRF.forEach(u => content.push({ type: 'image_url', role: 'reference_image', image_url: { url: u } }));
-      vidsRF.forEach(u => content.push({ type: 'video_url', role: 'reference_video', video_url: { url: u } }));
+      rfOK.forEach(u => content.push({ type: 'image_url', role: 'reference_image', image_url: { url: u } }));
+      vidsOK.forEach(u => content.push({ type: 'video_url', role: 'reference_video', video_url: { url: u } }));
       audsRF.forEach(u => content.push({ type: 'audio_url', role: 'reference_audio', audio_url: { url: u } }));
     }
-    /* 分辨率映射：720P → 720p, 4K → 4k（2.5 最高 1080p，4K 会被 API 拒绝） */
+    /* 分辨率映射：720P → 720p, 4K → 4k（2.5 最高 1080p，4K 会被 API 拒绝）；
+     Mini 版（doubao-seedance-2-0-mini）仅支持 480p/720p，选 1080p/4k 会被 400 拒绝，直接钳到 720p */
     const resMap = { '480P': '480p', '720P': '720p', '1080P': '1080p', '4K': '4k' };
-    const resolution = resMap[params.resolution] || '720p';
+    let resolution = resMap[params.resolution] || '720p';
+    if (/doubao-seedance-2-0-mini/i.test(String(cfg.modelId || '')) && resolution !== '480p') resolution = '720p';
     /* 比例：直接透传，空值用 adaptive */
     const ratio = params.aspect || 'adaptive';
     /* 时长：2.5 支持 4~30 秒，2.0 支持 4~15 秒 */
@@ -1215,29 +1340,18 @@
         } catch (e) { /* 网络抖动：继续轮询 */ }
         if (!st) continue;
         onProgress?.(Math.min(90, 10 + i * 0.5));
-        const sts = String((st && st.status) || '').toLowerCase();
-        if (sts === 'failed') {
+        if (st.status === 'failed') {
           const errMsg = (st.error && (st.error.message || st.error.code)) || '未知原因（费用已自动退款）';
           throw new Error('视频任务失败：' + errMsg);
         }
-        if (sts === 'succeeded') {
+        if (st.status === 'succeeded') {
           videoURL = (st.content && st.content.video_url) || '';
           if (videoURL) break;
         }
       }
       if (!videoURL) throw new Error('视频任务续轮询超时（15 分钟）');
       onProgress?.(93);
-      let blob = null;
-      for (let a = 0; a < 3 && !blob; a++) {
-        try {
-          const ctl = new AbortController();
-          const tm = setTimeout(() => ctl.abort(), 180000);
-          const resp = await fetch(videoURL, { signal: ctl.signal });
-          blob = resp.ok ? await resp.blob() : null;
-          clearTimeout(tm);
-        } catch (e) { blob = null; }
-      }
-      if (!blob) throw new Error('成片下载失败（网络超时，任务实际已完成）。请重新运行节点，或直接用链接下载：' + videoURL);
+      const blob = await (await fetch(videoURL)).blob();
       const dataURL = await blobToDataURL(blob);
       let frame = '';
       try { frame = await videoFirstFrame(dataURL); } catch (e) {}

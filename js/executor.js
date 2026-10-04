@@ -151,6 +151,22 @@
         if (creditKind && window.LC && LC.Auth && LC.Auth.statsBump) {
           try { LC.Auth.statsBump(creditKind); } catch (e) {}
         }
+        // 生成记录：名称/时间/提示词写入云端（后台点进去能看生成详情；失败不影响主流程）
+        try {
+          if (creditKind === 'image' || creditKind === 'video') {
+            const o = n.state.output || {};
+            const oUrl = String(o.url || '');
+            if (/^https?:\/\//i.test(oUrl) && window.LC && LC.Cloud && LC.Cloud.logGen) {
+              LC.Cloud.logGen({
+                name: oUrl.split('?')[0].split('/').pop() || '',
+                kind: creditKind,
+                prompt: o.meta?.prompt || n.props.prompt || '',
+                size: Number(o.size) || 0,
+                duration: creditKind === 'video' ? Number(o.duration) || 0 : 0,
+              });
+            }
+          }
+        } catch (e) {}
       } catch (err) {
         n.state.status = 'error';
         n.state.error = err.message;

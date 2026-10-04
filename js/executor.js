@@ -147,26 +147,8 @@
         await this.persistOutput(n.state.output);   // 生成媒体落盘 → 保存时零 base64
         n.state.status = 'done'; n.state.progress = 100;
         LC.App.registerAsset(n);
-        // 使用统计：每次生成成功按类型累加（后台管理展示；统计失败不影响主流程）
-        if (creditKind && window.LC && LC.Auth && LC.Auth.statsBump) {
-          try { LC.Auth.statsBump(creditKind); } catch (e) {}
-        }
-        // 生成记录：名称/时间/提示词写入云端（后台点进去能看生成详情；失败不影响主流程）
-        try {
-          if (creditKind === 'image' || creditKind === 'video') {
-            const o = n.state.output || {};
-            const oUrl = String(o.url || '');
-            if (/^https?:\/\//i.test(oUrl) && window.LC && LC.Cloud && LC.Cloud.logGen) {
-              LC.Cloud.logGen({
-                name: oUrl.split('?')[0].split('/').pop() || '',
-                kind: creditKind,
-                prompt: o.meta?.prompt || n.props.prompt || '',
-                size: Number(o.size) || 0,
-                duration: creditKind === 'video' ? Number(o.duration) || 0 : 0,
-              });
-            }
-          }
-        } catch (e) {}
+        // 使用统计 + 生成记录（成功一次记一次；失败不影响主流程）
+        this.recordGen(n, creditKind);
       } catch (err) {
         n.state.status = 'error';
         n.state.error = err.message;
@@ -188,6 +170,28 @@
       LC.App.view.renderMinimap();
       // 手动执行后不再自动联动下游：点击谁就只生成谁（下游需手动点 ▶；
       // 恢复既有任务(resume)仍保留 autoDownstream 继续原链路）
+    },
+
+    /* ---------- 生成成功记账：使用统计 + 生成记录（时间/提示词），失败不影响主流程 ---------- */
+    recordGen(n, kind) {
+      if (!kind) return;
+      if (window.LC && LC.Auth && LC.Auth.statsBump) {
+        try { LC.Auth.statsBump(kind); } catch (e) {}
+      }
+      if (kind !== 'image' && kind !== 'video') return;
+      try {
+        const o = n.state.output || {};
+        const oUrl = String(o.url || '');
+        if (/^https?:\/\//i.test(oUrl) && window.LC && LC.Cloud && LC.Cloud.logGen) {
+          LC.Cloud.logGen({
+            name: oUrl.split('?')[0].split('/').pop() || '',
+            kind,
+            prompt: o.meta?.prompt || n.props.prompt || '',
+            size: Number(o.size) || 0,
+            duration: kind === 'video' ? Number(o.duration) || 0 : 0,
+          });
+        }
+      } catch (e) { /* 记录失败不影响生成 */ }
     },
 
     /* ---------- 刷新后恢复：扫描 running 节点，查后端任务状态 ---------- */
@@ -296,6 +300,7 @@
         await this.persistOutput(n.state.output);   // 生成媒体落盘 → 保存时零 base64
         n.state.status = 'done'; n.state.progress = 100;
         LC.App.registerAsset(n);
+        this.recordGen(n, { image: 'image', video: 'video', audio: 'audio' }[t.ext && t.ext.kind] || { image: 'image', video: 'video', audio: 'audio' }[n.type]);
         LC.App.nodes.updateNode(id);
         g.emit('change');
         LC.App.saveSoon();

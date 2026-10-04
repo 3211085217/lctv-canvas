@@ -277,6 +277,27 @@
       });
     } catch (e) { /* 记录文件不存在时忽略 */ }
   }
+  /* 彻底删除用户：清空其画布/资产/统计/生成记录文件，最后从账号表移除。
+   * 顺序保证：账号记录最后删——中途失败可重试，不会出现「账号没了文件残留」的中间态 */
+  async function adminDeleteUser(username) {
+    const u = normName(username);
+    if (!u) throw new Error('用户名无效');
+    if (u === currentName()) throw new Error('不能删除当前登录的管理员账号');
+    const accs = await readAccounts();
+    const acc = accs.find((x) => x.u === u);
+    if (!acc) throw new Error('用户不存在');
+    if (acc.role === 'admin') throw new Error('不能删除管理员账号');
+    await G.delTree('users/' + u + '/');        // 索引 / 统计 / 生成记录
+    await G.delTree('projects/' + u + '/');     // 画布工程
+    await G.delTree('assets/' + u + '/');       // 图片视频等资产
+    const ok = await writeAccounts((arr) => {
+      const i = arr.findIndex((x) => x.u === u);
+      if (i < 0) throw new Error('用户已不存在');
+      arr.splice(i, 1);
+    });
+    if (!ok) throw new Error('账号表更新失败，请重试');
+    return u;
+  }
 
   /* ---------- 登录视图事件绑定 ---------- */
   function init() {
@@ -367,6 +388,7 @@
     adminAssets,
     adminGenlog,
     adminDeleteAsset,
+    adminDeleteUser,
   };
 
   // DOM 就绪即绑定（脚本在 body 末尾，元素已存在；保险起见兜底一次）

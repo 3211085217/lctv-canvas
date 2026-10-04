@@ -250,7 +250,8 @@
             state = { ...state, output: { ...o } };
             delete state.output._dataURL;   // 执行期缓存，绝不序列化
             if (state.output.dataURL && String(state.output.dataURL).startsWith('blob:')) {
-              state.output.dataURL = (o.meta && o.meta.videoURL) || '';
+              // 优先用自己云端持久化的稳定地址；没有才回退上游视频直链（直链可能过期）
+              state.output.dataURL = state.output.url || (o.meta && o.meta.videoURL) || '';
             } else if (state.output.dataURL && String(state.output.dataURL).startsWith('data:') && state.output.url) {
               state.output.dataURL = state.output.url;  // 有磁盘 URL 才剔除 dataURL
             }

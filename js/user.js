@@ -9,6 +9,18 @@
   const G = LC.GH;
   const $ = (s) => document.querySelector(s);
 
+  /* 版本自检：老标签页检测到远端更新后自动刷新 */
+  (function verCheck() {
+    try {
+      fetch('version.json?t=' + Date.now())
+        .then((r) => r.json())
+        .then((j) => {
+          if (j && typeof j.v === 'number' && j.v > 17) setTimeout(() => { try { location.reload(); } catch (e) {} }, 800);
+        })
+        .catch(() => {});
+    } catch (e) {}
+  })();
+
   const q = new URLSearchParams(location.search);
   const UNAME = (q.get('u') || '').trim();
   const modal = $('#u-modal');

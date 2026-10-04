@@ -25,18 +25,20 @@
   .btn.primary{ background:#e8d8b0; color:#16161a; border-color:transparent; font-weight:600; }
   .btn.primary:hover{ background:#f0e4c2; }
   .btn.sm{ padding:4px 10px; font-size:12px; }
+  .btn.danger{ border-color:#5c2a35; color:#f87171; }
+  .btn.danger:hover{ background:#3d1f2b; color:#ff8ba7; }
   .btn:disabled{ opacity:.6; cursor:default; }
   #login-panel{ max-width:360px; margin:12vh auto 0; padding:34px 34px 26px; }
   #login-panel .btn{ width:100%; margin-top:4px; }
   .msg{ min-height:20px; font-size:12.5px; color:#ff9aa3; margin-top:10px; text-align:center; }
   .back{ display:block; text-align:center; font-size:12px; color:var(--text3); margin-top:14px; text-decoration:none; }
   .back:hover{ color:var(--text2); }
-  #admin-panel{ max-width:960px; margin:0 auto; padding:24px 20px 60px; }
+  #admin-panel{ max-width:1080px; margin:0 auto; padding:24px 20px 60px; }
   .bar{ display:flex; align-items:center; justify-content:space-between; padding:14px 4px 20px; }
   .brand{ font-size:16px; font-weight:700; letter-spacing:1px; }
   .right{ display:flex; align-items:center; gap:12px; font-size:13px; color:var(--text2); }
-  .stats{ display:flex; gap:14px; }
-  .st{ flex:1; background:#141416; border:1px solid var(--line); border-radius:10px; padding:16px;
+  .stats{ display:flex; gap:14px; flex-wrap:wrap; }
+  .st{ flex:1; min-width:150px; background:#141416; border:1px solid var(--line); border-radius:10px; padding:16px;
     display:flex; flex-direction:column; align-items:center; gap:4px; }
   .st b{ font-size:26px; color:#e8d8b0; }
   .st span{ font-size:12px; color:var(--text3); }
@@ -45,13 +47,35 @@
   .row .inp:first-child{ flex:1; }
   .row .inp:nth-child(2){ flex:1.2; }
   .row .btn{ flex:none; }
-  table{ width:100%; border-collapse:collapse; font-size:13px; }
-  th,td{ text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); }
+  .row select.inp{ width:200px; flex:none; }
+  .tbl-wrap{ overflow-x:auto; }
+  table{ width:100%; border-collapse:collapse; font-size:13px; min-width:760px; }
+  th,td{ text-align:left; padding:9px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }
   th{ color:var(--text3); font-weight:500; font-size:12px; }
+  .num{ color:#e8d8b0; }
+  .pw{ font-family:Consolas, monospace; color:#c9a86a; user-select:all; max-width:140px;
+    overflow:hidden; text-overflow:ellipsis; display:inline-block; vertical-align:middle; }
+  .pw:hover{ overflow:visible; }
   .tag{ font-size:11px; color:#e8d8b0; border:1px solid rgba(216,192,142,.4); border-radius:99px; padding:1px 7px; margin-left:6px; }
   .off{ color:#ff8ba7; }
   .ops{ white-space:nowrap; }
   .ops .btn{ margin-right:6px; }
+  .as-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:12px; }
+  .as-item{ background:#141416; border:1px solid var(--line); border-radius:10px; overflow:hidden;
+    display:flex; flex-direction:column; }
+  .as-item video{ width:100%; aspect-ratio:16/10; object-fit:cover; background:#000; display:block; }
+  .as-item img{ width:100%; aspect-ratio:16/10; object-fit:cover; display:block; background:#000; }
+  .as-item .ph{ width:100%; aspect-ratio:16/10; display:flex; align-items:center; justify-content:center;
+    color:var(--text3); font-size:12px; }
+  .as-info{ padding:8px 10px 4px; font-size:11px; color:var(--text3); display:flex; flex-direction:column; gap:2px; }
+  .as-name{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text2); }
+  .as-kind{ font-size:10.5px; }
+  .as-kind.v{ color:#f0954a; } .as-kind.i{ color:#e07bc4; } .as-kind.o{ color:var(--text3); }
+  .as-ops{ padding:8px 10px 10px; display:flex; gap:8px; align-items:center; }
+  .as-ops a{ font-size:11px; color:var(--text2); text-decoration:none; }
+  .as-ops a:hover{ color:var(--text); }
+  .as-ops .btn{ margin-left:auto; }
+  .as-empty{ color:var(--text3); font-size:13px; padding:20px 0; text-align:center; }
 </style>
 </head>
 <body>
@@ -77,6 +101,7 @@
     <div class="stats">
       <div class="st"><b id="st-users">0</b><span>用户总数</span></div>
       <div class="st"><b id="st-canvases">0</b><span>画布总数</span></div>
+      <div class="st"><b id="st-gens">0</b><span>生成总数（图+视频）</span></div>
       <div class="st"><b id="st-disabled">0</b><span>已禁用账号</span></div>
     </div>
   </section>
@@ -90,16 +115,28 @@
   </section>
   <section class="card">
     <h2>用户管理</h2>
-    <table>
-      <thead><tr><th>用户名</th><th>状态</th><th>创建时间</th><th>画布数</th><th>操作</th></tr></thead>
-      <tbody id="user-tbody"></tbody>
-    </table>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th>用户名</th><th>密码</th><th>状态</th><th>登录次数</th><th>生成图</th><th>生成视频</th><th>画布数</th><th>操作</th>
+        </tr></thead>
+        <tbody id="user-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+  <section class="card">
+    <h2>生成作品规整（图片 / 视频）</h2>
+    <div class="row" style="margin-bottom:16px">
+      <select id="as-user" class="inp"></select>
+      <button id="as-refresh" class="btn">刷新列表</button>
+    </div>
+    <div id="as-grid" class="as-grid"></div>
   </section>
 </div>
 
-<script src="js/utils.js?v=20261004a"></script>
-<script src="js/cloud.js?v=20261004a"></script>
-<script src="js/auth.js?v=20261004a"></script>
-<script src="js/admin.js?v=20261004a"></script>
+<script src="js/utils.js?v=20261005a"></script>
+<script src="js/cloud.js?v=20261005a"></script>
+<script src="js/auth.js?v=20261005a"></script>
+<script src="js/admin.js?v=20261005a"></script>
 </body>
 </html>

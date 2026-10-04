@@ -63,28 +63,40 @@
       return res;
     },
 
-    /* 生成结果落盘：dataURL 转磁盘文件，output 只留 url（序列化零负担） */
+    /* 生成结果落盘：dataURL 转磁盘文件，output 只留 url（序列化零负担）
+   * 显示优先原则：dataURL 始终保留本地原始数据（base64/blob URL），画布内即时秒显；
+   * url 仅作跨端持久化，绝不再覆盖 dataURL（免得显示又去远端 CDN 一点点拉） */
     async persistOutput(output) {
       try {
         const o = output;
         if (!o || !o.dataURL || typeof o.dataURL !== 'string') return;
+        const extOf = (mime) => ({ 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp', 'video/mp4': '.mp4', 'video/webm': '.webm', 'audio/mpeg': '.mp3', 'audio/wav': '.wav' }[mime] || '');
+        // 远端直链（第三方返回 url）：先下载为本地 blob → 画布秒显（原始字节 0 损伤），再上传 GitHub 持久化；CORS 不通则维持直链
+        if (/^https?:\/\//i.test(o.dataURL)) {
+          try {
+            const dl = await fetch(o.dataURL);
+            if (!dl.ok) return;
+            const blob = await dl.blob();
+            o.dataURL = URL.createObjectURL(blob);
+            const j = await LC.Cloud.uploadAsset(blob, 'gen_' + Date.now() + extOf(blob.type || 'image/png'));
+            if (j && j.url) o.url = j.url;   // 只补持久化 url，不覆盖本地显示源
+          } catch (e) { /* CORS/网络失败：保持远端直链显示 */ }
+          return;
+        }
+        let blob;
         if (o.dataURL.startsWith('blob:')) {
           const blobRes = await fetch(o.dataURL);
           if (!blobRes.ok) return;
-          const blob = await blobRes.blob();
-          const ext = (blob.type.split('/')[1] || 'bin').replace('jpeg', 'jpg');
-          const j = await LC.Cloud.uploadAsset(blob, 'gen_' + Date.now() + '.' + ext);
-          if (j && j.url) { o.url = j.url; o.dataURL = j.url; }
+          blob = await blobRes.blob();
+        } else if (o.dataURL.startsWith('data:')) {
+          // base64 → blob：用 fetch(data: URL) 让浏览器原生解码，避免 atob + charCodeAt 循环阻塞主线程（几 MB 图像性能差异显著）
+          const dataRes = await fetch(o.dataURL);
+          blob = await dataRes.blob();
+        } else {
           return;
         }
-        if (!o.dataURL.startsWith('data:')) return;
-        // base64 → blob：用 fetch(data: URL) 让浏览器原生解码，避免 atob + charCodeAt 循环阻塞主线程（几 MB 图像性能差异显著）
-        const dataRes = await fetch(o.dataURL);
-        const blob = await dataRes.blob();
-        const mime = blob.type || 'application/octet-stream';
-        const ext = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp', 'video/mp4': '.mp4', 'video/webm': '.webm', 'audio/mpeg': '.mp3', 'audio/wav': '.wav' }[mime] || '';
-        const j = await LC.Cloud.uploadAsset(blob, 'gen_' + Date.now() + ext);
-        if (j && j.url) { o.url = j.url; o.dataURL = j.url; }   // 落盘成功：dataURL 一并替换为 URL（与 blob 分支一致），toJSON 见 url 即剔除 dataURL
+        const j = await LC.Cloud.uploadAsset(blob, 'gen_' + Date.now() + extOf(blob.type));
+        if (j && j.url) o.url = j.url;   // 落盘成功：只记 url 供跨端加载；dataURL 保留本地数据（画布秒显）
       } catch (e) { /* 落盘失败则保留 dataURL，下次保存仍走旧逻辑 */ }
     },
 
@@ -144,6 +156,7 @@
         const progress = (p) => { if (p > displayProg) setProg(p); };
         // AI.run 会直接复用运行开始已持久化的 n.state.taskId（presetTaskId），保证中途刷新可查
         n.state.output = await this.dispatch(n, progress, n.state.taskId);
+        LC.App.nodes.updateNode(id);          // 结果先本地秒显，云端上传在后台持久化
         await this.persistOutput(n.state.output);   // 生成媒体落盘 → 保存时零 base64
         n.state.status = 'done'; n.state.progress = 100;
         LC.App.registerAsset(n);
@@ -297,6 +310,7 @@
         n.state.output = await LC.AI.resumeExtTask(t.ext, progress, cfg);
         // 保存 AI 任务 ID
         n.state.taskId = n.state.taskId || (n.state.output && n.state.output._taskId);
+        LC.App.nodes.updateNode(id);          // 恢复完成同样先本地秒显
         await this.persistOutput(n.state.output);   // 生成媒体落盘 → 保存时零 base64
         n.state.status = 'done'; n.state.progress = 100;
         LC.App.registerAsset(n);

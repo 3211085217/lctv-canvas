@@ -3,6 +3,22 @@
  * ===================================================== */
 (function () {
   const U = LC.U;
+  const __LC_VER = 17;   // 与 version.json 的 v 对齐：老标签页检测到远端更新会自动刷新，无需手动强刷
+
+  /* 版本自检：远端 version.json 的 v 比本文件新 → 提示并自动刷新页面 */
+  function verCheck() {
+    try {
+      fetch('version.json?t=' + Date.now())
+        .then((r) => r.json())
+        .then((j) => {
+          if (j && typeof j.v === 'number' && j.v > __LC_VER) {
+            try { if (window.LC && LC.App && LC.App.toast) LC.App.toast('版本已更新，正在自动刷新…', 'ok'); } catch (e) {}
+            setTimeout(() => { try { location.reload(); } catch (e) {} }, 1500);
+          }
+        })
+        .catch(() => {});
+    } catch (e) {}
+  }
 
   const App = {
     graph: null, view: null, nodes: null, edges: null,
@@ -802,6 +818,7 @@
       bar.textContent = '⚠ 应用初始化失败：' + (err && err.message) + ' —— 请按 F12 查看控制台并截图反馈';
       document.body.appendChild(bar);
     }
+    verCheck();
   };
   // 全局错误兜底：运行时报错也可见（toast 而非无声失败）
   window.addEventListener('error', (e) => {

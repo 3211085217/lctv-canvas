@@ -737,6 +737,47 @@ body.linking .port{ pointer-events:auto; }
   background:radial-gradient(circle, rgba(222,198,150,.13), transparent 62%);
   pointer-events:none; z-index:0; transition:transform .5s ease-out; }
 
+/* ================= 登录视图（未登录强制显示） ================= */
+.auth-view{ position:fixed; inset:0; z-index:300; display:flex; align-items:center; justify-content:center;
+  background:#0d0d0f; }
+.auth-view[hidden]{ display:none; }
+.auth-view::before{ content:''; position:fixed; inset:0; z-index:0; pointer-events:none;
+  background:
+    radial-gradient(circle, rgba(255,255,255,.035) 1px, transparent 1.6px),
+    radial-gradient(900px 480px at 50% -10%, rgba(150,140,120,.16), transparent 62%);
+  background-size: 26px 26px, 100% 100%; }
+.auth-card{ position:relative; z-index:1; width:360px; max-width:92vw; box-sizing:border-box;
+  background:rgba(24,24,28,.92); border:1px solid #2a2a2e; border-radius:18px; padding:40px 36px 30px;
+  box-shadow:0 24px 70px rgba(0,0,0,.55); display:flex; flex-direction:column; align-items:center; }
+.auth-logo{ font-size:52px; line-height:1; font-weight:300;
+  background:linear-gradient(135deg, #f0ece2 0%, #cbb88b 55%, #94876c 100%);
+  -webkit-background-clip:text; background-clip:text; color:transparent; -webkit-text-fill-color:transparent; }
+.auth-title{ font-size:24px; font-weight:700; color:var(--text); margin-top:14px; letter-spacing:2px; }
+.auth-sub{ font-size:12px; color:var(--text3); margin-top:6px; letter-spacing:.5px; }
+.auth-tabs{ display:flex; gap:6px; margin:24px 0 18px; width:100%; background:#1c1c20;
+  border:1px solid var(--line); border-radius:10px; padding:4px; box-sizing:border-box; }
+.auth-tab{ flex:1; background:transparent; border:none; color:var(--text3); font-size:13px;
+  padding:8px 0; border-radius:7px; cursor:pointer; transition:all .15s; }
+.auth-tab.on{ color:#16161a; background:#e8d8b0; font-weight:600; }
+.auth-form{ display:flex; flex-direction:column; gap:10px; width:100%; }
+.auth-form[hidden]{ display:none; }
+.auth-input{ background:#141416; border:1px solid var(--line2); border-radius:9px; color:var(--text);
+  font-size:13.5px; padding:11px 13px; outline:none; width:100%; box-sizing:border-box; transition:border-color .15s; }
+.auth-input:focus{ border-color:#c9a86a; }
+.auth-input::placeholder{ color:var(--text3); }
+.auth-btn{ border:none; border-radius:9px; padding:12px 0; font-size:14px; font-weight:600;
+  color:#16161a; background:#e8d8b0; cursor:pointer; transition:all .18s; }
+.auth-btn:hover{ background:#f0e4c2; box-shadow:0 8px 22px rgba(200,175,120,.25); }
+.auth-btn:disabled{ opacity:.6; cursor:default; }
+.auth-msg{ min-height:18px; font-size:12px; color:var(--text2); margin-top:12px; text-align:center; }
+.auth-msg.err{ color:#ff9aa3; }
+.auth-foot{ margin-top:14px; font-size:11px; color:var(--text3); letter-spacing:.5px; }
+
+/* 顶栏当前用户 */
+.auth-user{ font-size:12px; color:var(--text2); padding:2px 10px; border:1px solid var(--line2);
+  border-radius:99px; white-space:nowrap; }
+.auth-user:empty{ display:none; }
+
 /* ================= 智能对齐参考线 ================= */
 .align-guides{ position:absolute; inset:0; pointer-events:none; z-index:60; overflow:hidden; }
 .ag-line{ position:absolute; }

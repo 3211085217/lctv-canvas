@@ -253,6 +253,30 @@
       return out;
     } catch (e) { return []; }
   }
+  /* 读某用户的生成记录（时间/类型/提示词） */
+  async function adminGenlog(username) {
+    const u = normName(username);
+    if (!u) return { items: [] };
+    try {
+      const t = await G.raw('users/' + u + '/genlog.json');
+      if (!t) return { items: [] };
+      const m = JSON.parse(t);
+      return (m && Array.isArray(m.items)) ? m : { items: [] };
+    } catch (e) { return { items: [] }; }
+  }
+  /* 删除某用户的资产文件，并同步移除生成记录里的对应条目 */
+  async function adminDeleteAsset(username, name) {
+    const u = normName(username);
+    if (!u || !name) return;
+    await G.delFile('assets/' + u + '/' + name);
+    try {
+      await G.mergeJSON('users/' + u + '/genlog.json', (m) => {
+        if (!m || !Array.isArray(m.items)) return { items: [] };
+        m.items = m.items.filter((it) => it.name !== name);
+        return m;
+      });
+    } catch (e) { /* 记录文件不存在时忽略 */ }
+  }
 
   /* ---------- 登录视图事件绑定 ---------- */
   function init() {
@@ -341,6 +365,8 @@
     statsBump,
     adminStats,
     adminAssets,
+    adminGenlog,
+    adminDeleteAsset,
   };
 
   // DOM 就绪即绑定（脚本在 body 末尾，元素已存在；保险起见兜底一次）

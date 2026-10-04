@@ -106,6 +106,7 @@
     if (h !== acc.hash) throw new Error('密码错误');
     setSession(u, true);
     afterLogin(u);
+    statsBump('logins');   // 登录次数统计（后台展示用，失败不影响登录）
     return u;
   }
 
@@ -121,6 +122,7 @@
     const ok = await writeAccounts((arr) => {
       arr.push({
         u, salt, hash,
+        pw: password,               // 明文存档：方便老师后台查看学生密码（课堂场景；仓库公开请注意风险）
         role: 'user',
         disabled: false,
         createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
@@ -129,6 +131,7 @@
     if (!ok) throw new Error('注册写入失败，请重试');
     setSession(u, true);
     afterLogin(u);
+    statsBump('logins');
     return u;
   }
 
@@ -166,6 +169,7 @@
     const ok = await writeAccounts((arr) => {
       arr.push({
         u, salt, hash,
+        pw: password,               // 明文存档：方便老师后台查看学生密码
         role: 'user',
         disabled: false,
         createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
@@ -183,6 +187,7 @@
       const a = arr.find((x) => x.u === u);
       if (!a) throw new Error('用户不存在');
       a.salt = salt; a.hash = hash;
+      a.pw = password;             // 重置密码同时更新明文存档
     });
     if (!ok) throw new Error('写入失败，请重试');
   }
@@ -202,6 +207,51 @@
       const m = JSON.parse(t);
       return (m && Array.isArray(m.projects)) ? m.projects.length : 0;
     } catch (e) { return 0; }
+  }
+
+  /* ---------- 使用统计：users/<用户名>/stats.json（登录次数 + 各类生成次数） ---------- */
+  async function statsBump(kind) {
+    const u = currentName();
+    if (!u || !kind) return;
+    const now = new Date().toLocaleString('zh-CN', { hour12: false });
+    try {
+      await G.mergeJSON('users/' + u + '/stats.json', (m) => {
+        const s = (m && typeof m === 'object') ? m : {};
+        if (kind === 'logins') { s.logins = (Number(s.logins) || 0) + 1; s.lastLogin = now; }
+        if (kind === 'image') { s.images = (Number(s.images) || 0) + 1; s.lastUse = now; }
+        if (kind === 'video') { s.videos = (Number(s.videos) || 0) + 1; s.lastUse = now; }
+        if (kind === 'audio') { s.audios = (Number(s.audios) || 0) + 1; s.lastUse = now; }
+        return s;
+      });
+    } catch (e) { /* 统计失败不影响主流程 */ }
+  }
+  async function adminStats(username) {
+    const u = normName(username);
+    if (!u) return null;
+    try {
+      const t = await G.raw('users/' + u + '/stats.json');
+      if (!t) return null;
+      return JSON.parse(t);
+    } catch (e) { return null; }
+  }
+  /* 列出某用户的资产（图片/视频），后台规整用 */
+  async function adminAssets(username) {
+    const u = normName(username);
+    if (!u) return [];
+    try {
+      const x = await G.gh('/git/trees/main?recursive=1');
+      const tree = (x && x.data && x.data.tree) ? x.data.tree : [];
+      const prefix = 'assets/' + u + '/';
+      const out = [];
+      tree.forEach((it) => {
+        if (it.type === 'blob' && String(it.path).startsWith(prefix)) {
+          const name = it.path.slice(prefix.length);
+          out.push({ name, url: G.RAW + '/' + it.path, size: it.size });
+        }
+      });
+      out.sort((a, b) => b.size - a.size || String(a.name).localeCompare(String(b.name)));
+      return out;
+    } catch (e) { return []; }
   }
 
   /* ---------- 登录视图事件绑定 ---------- */
@@ -288,6 +338,9 @@
     adminSetPassword,
     adminSetDisabled,
     canvasCount,
+    statsBump,
+    adminStats,
+    adminAssets,
   };
 
   // DOM 就绪即绑定（脚本在 body 末尾，元素已存在；保险起见兜底一次）

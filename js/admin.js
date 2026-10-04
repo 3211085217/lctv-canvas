@@ -9,6 +9,18 @@
   const A = LC.Auth;
   const $ = (s) => document.querySelector(s);
 
+  /* 版本自检：老标签页检测到远端更新后自动刷新（避免旧代码页面残留） */
+  (function verCheck() {
+    try {
+      fetch('version.json?t=' + Date.now())
+        .then((r) => r.json())
+        .then((j) => {
+          if (j && typeof j.v === 'number' && j.v > 17) setTimeout(() => { try { location.reload(); } catch (e) {} }, 800);
+        })
+        .catch(() => {});
+    } catch (e) {}
+  })();
+
   const loginPanel = $('#login-panel');
   const panel = $('#admin-panel');
 

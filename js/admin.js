@@ -22,18 +22,21 @@
     $('#ad-who').textContent = '👤 ' + me;
     const users = await A.adminList();
     _users = users;
+    // 并行拉取每个用户的统计与画布数（用户多时避免串行慢）
+    const rowsData = await Promise.all(users.map(async (u) => ({
+      u,
+      st: await A.adminStats(u.u).catch(() => null) || {},
+      n: await A.canvasCount(u.u).catch(() => 0),
+    })));
     let totalCanvas = 0, totalGen = 0, disabled = 0;
-    const rows = [];
-    for (const u of users) {
-      const st = await A.adminStats(u.u).catch(() => null) || {};
-      const n = await A.canvasCount(u.u).catch(() => 0);
+    const rows = rowsData.map(({ u, st, n }) => {
       const imgs = Number(st.images) || 0;
       const vids = Number(st.videos) || 0;
       const logins = Number(st.logins) || 0;
       totalCanvas += n;
       totalGen += imgs + vids;
       if (u.disabled) disabled++;
-      rows.push(`<tr>
+      return `<tr>
         <td>
           <a class="ulink" href="user.html?u=${encodeURIComponent(u.u)}" target="_blank" rel="noopener" title="在新标签页查看该用户详情">${esc(u.u)}</a>
           ${u.role === 'admin' ? '<span class="tag">管理员</span>' : ''}
@@ -47,8 +50,8 @@
         <td class="ops">
           <button class="btn sm" data-op="toggle" data-u="${esc(u.u)}">${u.disabled ? '启用' : '禁用'}</button>
           <button class="btn sm" data-op="pwd" data-u="${esc(u.u)}">重置密码</button>
-        </td></tr>`);
-    }
+        </td></tr>`;
+    });
     $('#user-tbody').innerHTML = rows.join('');
     $('#st-users').textContent = users.length;
     $('#st-canvases').textContent = totalCanvas;

@@ -15,7 +15,7 @@
       fetch('version.json?t=' + Date.now())
         .then((r) => r.json())
         .then((j) => {
-          if (j && typeof j.v === 'number' && j.v > 17) setTimeout(() => { try { location.reload(); } catch (e) {} }, 800);
+          if (j && typeof j.v === 'number' && j.v > 18) setTimeout(() => { try { location.reload(); } catch (e) {} }, 800);
         })
         .catch(() => {});
     } catch (e) {}

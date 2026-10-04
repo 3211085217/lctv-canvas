@@ -147,6 +147,10 @@
         await this.persistOutput(n.state.output);   // 生成媒体落盘 → 保存时零 base64
         n.state.status = 'done'; n.state.progress = 100;
         LC.App.registerAsset(n);
+        // 使用统计：每次生成成功按类型累加（后台管理展示；统计失败不影响主流程）
+        if (creditKind && window.LC && LC.Auth && LC.Auth.statsBump) {
+          try { LC.Auth.statsBump(creditKind); } catch (e) {}
+        }
       } catch (err) {
         n.state.status = 'error';
         n.state.error = err.message;

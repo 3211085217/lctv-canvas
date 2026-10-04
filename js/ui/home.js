@@ -5,28 +5,34 @@
 (function () {
   const U = LC.U;
 
+  /* ---------- 按账号隔离的本地缓存键（登录不同账号互不串数据） ---------- */
+  const _who = () => { try { return (window.LC && LC.Auth && LC.Auth.currentName()) || 'anon'; } catch (e) { return 'anon'; } };
+  const _pk = () => 'projects:' + _who();          // 画布本地缓存（IndexedDB）
+  const _dk = () => 'lc_deleted:' + _who();        // 已删画布标记（localStorage）
+  const _loadDeleted = () => { try { return JSON.parse(localStorage.getItem(_dk()) || '[]'); } catch (e) { return []; } };
+
   const Home = {
     _currentId: null,   // 当前打开的画布 id
-    _deleted: new Set((() => { try { return JSON.parse(localStorage.getItem('lc_deleted') || '[]'); } catch (e) { return []; } })( )), // 已删除id：持久化，跨页面阻止复活
+    _deleted: new Set(_loadDeleted()), // 已删除id：持久化，跨页面阻止复活
 
     /* 已删除标记：内存 + localStorage 双检查（跨页面共享，任何页面都不能把已删画布写回云端/复活） */
     _isDeleted(id) {
       if (this._deleted.has(id)) return true;
-      try { if ((JSON.parse(localStorage.getItem('lc_deleted') || '[]')).includes(id)) return true; } catch (e) {}
+      try { if (_loadDeleted().includes(id)) return true; } catch (e) {}
       return false;
     },
     _markDeleted(id) {
       this._deleted.add(id);
       try {
-        const arr = JSON.parse(localStorage.getItem('lc_deleted') || '[]');
-        if (!arr.includes(id)) { arr.push(id); localStorage.setItem('lc_deleted', JSON.stringify(arr.slice(-300))); }
+        const arr = _loadDeleted();
+        if (!arr.includes(id)) { arr.push(id); localStorage.setItem(_dk(), JSON.stringify(arr.slice(-300))); }
       } catch (e) {}
     },
     _unmarkDeleted(id) {
       this._deleted.delete(id);
       try {
-        const arr = (JSON.parse(localStorage.getItem('lc_deleted') || '[]')).filter((x) => x !== id);
-        localStorage.setItem('lc_deleted', JSON.stringify(arr));
+        const arr = _loadDeleted().filter((x) => x !== id);
+        localStorage.setItem(_dk(), JSON.stringify(arr));
       } catch (e) {}
     },
 
@@ -74,7 +80,7 @@
     },
     async _getCached(id) {
       try {
-        const raw = await LC.Store.get('projects');
+        const raw = await LC.Store.get(_pk());
         const rows = JSON.parse(raw || '[]');
         const p = rows.find((x) => x.canvasId === id || x.id === id);
         if (!p) return null;
@@ -84,21 +90,21 @@
     },
     async _cache(id, data) {
       try {
-        const raw = await LC.Store.get('projects');
+        const raw = await LC.Store.get(_pk());
         let rows = JSON.parse(raw || '[]');
         const now = U.formatTime();
         const old = rows.find((p) => p.canvasId === id);
         const rec = { id: old?.id || U.uid('p'), canvasId: id, name: data.name || '未命名画布', time: now, data: JSON.stringify(data) };
         rows = rows.filter((p) => p.canvasId !== id && p.id !== id);
         rows.unshift(rec);
-        await LC.Store.set('projects', JSON.stringify(rows.slice(0, 30)));
+        await LC.Store.set(_pk(), JSON.stringify(rows.slice(0, 30)));
       } catch (e) {}
     },
     async _removeCache(id) {
       try {
-        const raw = await LC.Store.get('projects');
+        const raw = await LC.Store.get(_pk());
         const rows = JSON.parse(raw || '[]').filter((p) => p.canvasId !== id && p.id !== id);
-        await LC.Store.set('projects', JSON.stringify(rows));
+        await LC.Store.set(_pk(), JSON.stringify(rows));
       } catch (e) {}
     },
     async _saveFile(id, obj, options = {}) {
@@ -274,10 +280,19 @@
       });
     },
 
+    /* ---------- 切换账号：重置当前画布与已删集合，回到首页刷新列表 ---------- */
+    switchAccount() {
+      this._currentId = null;
+      this._deleted = new Set(_loadDeleted());
+      this.show();
+    },
+
     /* ---------- 显隐控制 ---------- */
     show() {
       const hv = U.$('#home-view');
       if (!hv) return;
+      // 登录门：未登录 → 显示登录视图并中止
+      if (!(window.LC && LC.Auth && LC.Auth.currentName())) { LC.Auth.gate(); return; }
       hv.hidden = false;
       U.$('#topbar').style.display = 'none';
       U.$('#workspace').style.display = 'none';

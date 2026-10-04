@@ -1,0 +1,296 @@
+/* =====================================================
+ * auth.js — 轻量账号系统（纯前端 + GitHub 数据仓库）
+ * 账号表：accounts.json（{ accounts: [{u,salt,hash,role,disabled,createdAt}] }）
+ * 会话：localStorage lc_session = {u, t}（登录后同浏览器免密）
+ * 密码：PBKDF2-SHA256（12 万次迭代，随机盐），不存明文
+ * 说明：这是「防君子不防高手」级别的登录——仓库公开、共享写入令牌在前端，
+ *       用于同学们之间的数据隔离，不承诺抵御技术攻击。
+ * ===================================================== */
+(function () {
+  const U = LC.U;
+  const G = LC.GH;
+  const ACC_PATH = 'accounts.json';
+  const SESSION_KEY = 'lc_session';
+  const ITER = 120000;
+
+  /* ---------- 密码哈希（hex 盐字符串 <-> 字节，与 seed_admin.py 保持一致） ---------- */
+  async function hashPassword(password, saltHex) {
+    const enc = new TextEncoder();
+    const saltBytes = new Uint8Array((saltHex.match(/.{2}/g) || []).map((b) => parseInt(b, 16)));
+    const key = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']);
+    const bits = await crypto.subtle.deriveBits(
+      { name: 'PBKDF2', salt: saltBytes, iterations: ITER, hash: 'SHA-256' }, key, 256);
+    let bin = '';
+    new Uint8Array(bits).forEach((b) => { bin += String.fromCharCode(b); });
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  async function newSalt() {
+    const buf = new Uint8Array(16);
+    crypto.getRandomValues(buf);
+    return Array.from(buf).map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  /* ---------- 账号表读写 ---------- */
+  async function readAccounts() {
+    try {
+      const t = await G.raw(ACC_PATH);
+      if (!t) return [];
+      const m = JSON.parse(t);
+      return (m && Array.isArray(m.accounts)) ? m.accounts : [];
+    } catch (e) { return []; }
+  }
+  async function writeAccounts(mutate) {
+    return G.mergeJSON(ACC_PATH, (m) => {
+      const mm = (m && Array.isArray(m.accounts)) ? m : { accounts: [] };
+      mutate(mm.accounts);
+      return mm;
+    });
+  }
+  function normName(s) {
+    return String(s || '').trim();
+  }
+  const NAME_RE = /^[\u4e00-\u9fa5A-Za-z0-9_-]{2,20}$/;
+
+  /* ---------- 会话 ---------- */
+  function currentName() {
+    try {
+      const s = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
+      return s && s.u ? String(s.u) : '';
+    } catch (e) { return ''; }
+  }
+  function setSession(u, on) {
+    try {
+      if (on) localStorage.setItem(SESSION_KEY, JSON.stringify({ u, t: Date.now() }));
+      else localStorage.removeItem(SESSION_KEY);
+    } catch (e) {}
+  }
+
+  /* ---------- 登录门：show()/hide() 由调用方控制 ---------- */
+  function gate() {
+    const av = U.$('#auth-view');
+    if (!av) return;
+    av.hidden = false;
+    const hv = U.$('#home-view'); if (hv) hv.hidden = true;
+    const tb = U.$('#topbar'); if (tb) tb.style.display = 'none';
+    const ws = U.$('#workspace'); if (ws) ws.style.display = 'none';
+    refreshTopbar();
+  }
+  function open(u) {
+    const av = U.$('#auth-view');
+    if (av) av.hidden = true;
+    const tb = U.$('#topbar'); if (tb) tb.style.display = '';
+    refreshTopbar();
+  }
+  function refreshTopbar() {
+    const u = currentName();
+    const chip = U.$('#auth-user');
+    const out = U.$('#auth-logout');
+    if (chip) chip.textContent = u ? ('👤 ' + u) : '';
+    if (out) out.hidden = !u;
+  }
+  function afterLogin(u) {
+    open(u);
+    if (LC.Home) LC.Home.switchAccount();
+  }
+
+  /* ---------- 登录 / 注册 / 登出 ---------- */
+  async function login(username, password) {
+    const u = normName(username);
+    if (!u) throw new Error('请输入用户名');
+    if (!password) throw new Error('请输入密码');
+    const accs = await readAccounts();
+    const acc = accs.find((a) => a.u === u);
+    if (!acc) throw new Error('账号不存在，请先注册');
+    if (acc.disabled) throw new Error('该账号已被管理员禁用');
+    const h = await hashPassword(password, acc.salt);
+    if (h !== acc.hash) throw new Error('密码错误');
+    setSession(u, true);
+    afterLogin(u);
+    return u;
+  }
+
+  async function register(username, password, password2) {
+    const u = normName(username);
+    if (!NAME_RE.test(u)) throw new Error('用户名需 2-20 位，仅限中文/字母/数字/_/-');
+    if (!password || String(password).length < 4) throw new Error('密码至少 4 位');
+    if (password !== password2) throw new Error('两次输入的密码不一致');
+    const accs = await readAccounts();
+    if (accs.some((a) => a.u === u)) throw new Error('用户名已被注册');
+    const salt = await newSalt();
+    const hash = await hashPassword(password, salt);
+    const ok = await writeAccounts((arr) => {
+      arr.push({
+        u, salt, hash,
+        role: 'user',
+        disabled: false,
+        createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+      });
+    });
+    if (!ok) throw new Error('注册写入失败，请重试');
+    setSession(u, true);
+    afterLogin(u);
+    return u;
+  }
+
+  function logout() {
+    setSession('', false);
+    if (LC.Home) {
+      try { LC.Home._currentId = null; } catch (e) {}
+      try { LC.Home._deleted = new Set(); } catch (e) {}
+    }
+    gate();
+  }
+
+  function isAdmin() {
+    return new Promise(async (resolve) => {
+      const u = currentName();
+      if (!u) return resolve(false);
+      try {
+        const accs = await readAccounts();
+        const acc = accs.find((a) => a.u === u);
+        resolve(!!acc && acc.role === 'admin' && !acc.disabled);
+      } catch (e) { resolve(false); }
+    });
+  }
+
+  /* ---------- 管理员操作（admin.html 后台使用） ---------- */
+  async function adminList() { return readAccounts(); }
+  async function adminCreate(username, password) {
+    const u = normName(username);
+    if (!NAME_RE.test(u)) throw new Error('用户名需 2-20 位，仅限中文/字母/数字/_/-');
+    if (!password || String(password).length < 4) throw new Error('密码至少 4 位');
+    const accs = await readAccounts();
+    if (accs.some((a) => a.u === u)) throw new Error('用户名已存在');
+    const salt = await newSalt();
+    const hash = await hashPassword(password, salt);
+    const ok = await writeAccounts((arr) => {
+      arr.push({
+        u, salt, hash,
+        role: 'user',
+        disabled: false,
+        createdAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+      });
+    });
+    if (!ok) throw new Error('写入失败，请重试');
+    return u;
+  }
+  async function adminSetPassword(username, password) {
+    const u = normName(username);
+    if (!password || String(password).length < 4) throw new Error('密码至少 4 位');
+    const salt = await newSalt();
+    const hash = await hashPassword(password, salt);
+    const ok = await writeAccounts((arr) => {
+      const a = arr.find((x) => x.u === u);
+      if (!a) throw new Error('用户不存在');
+      a.salt = salt; a.hash = hash;
+    });
+    if (!ok) throw new Error('写入失败，请重试');
+  }
+  async function adminSetDisabled(username, disabled) {
+    const u = normName(username);
+    const ok = await writeAccounts((arr) => {
+      const a = arr.find((x) => x.u === u);
+      if (!a) throw new Error('用户不存在');
+      a.disabled = !!disabled;
+    });
+    if (!ok) throw new Error('写入失败，请重试');
+  }
+  async function canvasCount(username) {
+    try {
+      const t = await G.raw('users/' + encodeURIComponent(username) + '/manifest.json');
+      if (!t) return 0;
+      const m = JSON.parse(t);
+      return (m && Array.isArray(m.projects)) ? m.projects.length : 0;
+    } catch (e) { return 0; }
+  }
+
+  /* ---------- 登录视图事件绑定 ---------- */
+  function init() {
+    const av = U.$('#auth-view');
+    if (!av) return;
+
+    // 标签切换
+    av.querySelectorAll('[data-atab]').forEach((btn) => {
+      btn.onclick = () => {
+        av.querySelectorAll('[data-atab]').forEach((b) => b.classList.remove('on'));
+        btn.classList.add('on');
+        av.querySelectorAll('[data-aform]').forEach((f) => { f.hidden = f.dataset.aform !== btn.dataset.atab; });
+        const msg = U.$('#auth-msg');
+        if (msg) msg.textContent = '';
+      };
+    });
+
+    const msg = (t, err) => {
+      const el = U.$('#auth-msg');
+      if (el) { el.textContent = t || ''; el.classList.toggle('err', !!err); }
+    };
+    const busy = (form, on) => {
+      const btn = form.querySelector('button[type=submit]');
+      if (btn) { btn.disabled = on; btn.textContent = on ? '请稍候…' : btn.dataset.label; }
+    };
+
+    // 登录
+    const lf = U.$('#auth-login-form');
+    if (lf) lf.onsubmit = async (e) => {
+      e.preventDefault();
+      msg('');
+      busy(lf, true);
+      try {
+        await login(U.$('#al-user').value, U.$('#al-pass').value);
+        msg('登录成功', false);
+      } catch (err) {
+        msg(err.message, true);
+      }
+      busy(lf, false);
+    };
+    // 注册
+    const rf = U.$('#auth-reg-form');
+    if (rf) rf.onsubmit = async (e) => {
+      e.preventDefault();
+      msg('');
+      busy(rf, true);
+      try {
+        const u = await register(U.$('#ar-user').value, U.$('#ar-pass').value, U.$('#ar-pass2').value);
+        msg('注册成功', false);
+        void u;
+      } catch (err) {
+        msg(err.message, true);
+      }
+      busy(rf, false);
+    };
+
+    // 顶栏退出
+    const out = U.$('#auth-logout');
+    if (out) out.onclick = () => logout();
+
+    // 当前已登录：直接回首页视图
+    if (currentName()) {
+      open();
+    } else {
+      gate();
+    }
+  }
+
+  window.LC = window.LC || {};
+  LC.Auth = {
+    init,
+    gate,
+    open,
+    currentName,
+    login,
+    register,
+    logout,
+    isAdmin,
+    hashPassword,
+    NAME_RE,
+    adminList,
+    adminCreate,
+    adminSetPassword,
+    adminSetDisabled,
+    canvasCount,
+  };
+
+  // DOM 就绪即绑定（脚本在 body 末尾，元素已存在；保险起见兜底一次）
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();

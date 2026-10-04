@@ -298,6 +298,26 @@
     }
   }
 
+  /* ---------- 生成记录：users/<用户名>/genlog.json（后台查看时间/提示词用） ---------- */
+  async function logGen(rec) {
+    const u = uname();
+    if (!u || !rec || !rec.name) return;
+    try {
+      await mergeJSON('users/' + u + '/genlog.json', (m) => {
+        const mm = (m && Array.isArray(m.items)) ? m : { items: [] };
+        mm.items = [{
+          name: String(rec.name).slice(0, 200),
+          kind: rec.kind === 'video' ? 'video' : 'image',
+          time: new Date().toLocaleString('zh-CN', { hour12: false }),
+          prompt: String(rec.prompt || '').slice(0, 2000),
+          size: Number(rec.size) || 0,
+          duration: Number(rec.duration) || 0,
+        }, ...mm.items].slice(0, 200);
+        return mm;
+      });
+    } catch (e) { /* 记录失败不影响生成 */ }
+  }
+
   /* ---------- AI 任务（网页版无需独立任务表；状态随工程持久化） ---------- */
   function aiTask(action, payload) { /* web 版 no-op，状态在画布文件里 */ }
 
@@ -315,6 +335,7 @@
     deleteAsset,
     toPublicUrl,
     aiTask,
+    logGen,
     b64utf8,
     _lastErr: () => _lastErr,
   };

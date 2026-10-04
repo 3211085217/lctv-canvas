@@ -25,8 +25,6 @@
   .btn.primary{ background:#e8d8b0; color:#16161a; border-color:transparent; font-weight:600; }
   .btn.primary:hover{ background:#f0e4c2; }
   .btn.sm{ padding:4px 10px; font-size:12px; }
-  .btn.danger{ border-color:#5c2a35; color:#f87171; }
-  .btn.danger:hover{ background:#3d1f2b; color:#ff8ba7; }
   .btn:disabled{ opacity:.6; cursor:default; }
   #login-panel{ max-width:360px; margin:12vh auto 0; padding:34px 34px 26px; }
   #login-panel .btn{ width:100%; margin-top:4px; }
@@ -47,12 +45,13 @@
   .row .inp:first-child{ flex:1; }
   .row .inp:nth-child(2){ flex:1.2; }
   .row .btn{ flex:none; }
-  .row select.inp{ width:220px; flex:none; }
   .tbl-wrap{ overflow-x:auto; }
-  table{ width:100%; border-collapse:collapse; font-size:13px; min-width:820px; }
+  table{ width:100%; border-collapse:collapse; font-size:13px; min-width:780px; }
   th,td{ text-align:left; padding:9px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }
   th{ color:var(--text3); font-weight:500; font-size:12px; }
   .num{ color:#e8d8b0; }
+  .ulink{ color:#c9a86a; text-decoration:none; border-bottom:1px dashed rgba(201,168,106,.5); }
+  .ulink:hover{ color:#e8d8b0; }
   .pw{ font-family:Consolas, monospace; color:#c9a86a; user-select:all; max-width:140px;
     overflow:hidden; text-overflow:ellipsis; display:inline-block; vertical-align:middle; }
   .pw:hover{ overflow:visible; }
@@ -60,46 +59,7 @@
   .off{ color:#ff8ba7; }
   .ops{ white-space:nowrap; }
   .ops .btn{ margin-right:6px; }
-  /* 生成记录 */
-  .chips{ display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap; font-size:12.5px; color:var(--text3); }
-  .chips b{ color:#e8d8b0; }
-  .as-list{ display:grid; grid-template-columns:repeat(auto-fill, minmax(230px, 1fr)); gap:12px; }
-  .as-item{ background:#141416; border:1px solid var(--line); border-radius:10px; overflow:hidden;
-    display:flex; flex-direction:column; }
-  .as-item .mv{ width:100%; aspect-ratio:16/10; object-fit:cover; background:#000; display:block; cursor:zoom-in; }
-  .as-item .im{ width:100%; aspect-ratio:16/10; object-fit:cover; display:block; background:#000; cursor:zoom-in; }
-  .as-item .ph{ width:100%; aspect-ratio:16/10; display:flex; align-items:center; justify-content:center; color:var(--text3); font-size:12px; }
-  .as-info{ padding:9px 10px 4px; font-size:11px; color:var(--text3); display:flex; flex-direction:column; gap:3px; }
-  .as-name{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text2); }
-  .as-time{ font-size:10.5px; }
-  .as-kind{ font-size:10.5px; }
-  .as-kind.v{ color:#f0954a; } .as-kind.i{ color:#e07bc4; } .as-kind.o{ color:var(--text3); }
-  .as-prompt{ font-size:11px; color:var(--text2); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
-    overflow:hidden; line-height:1.5; margin-top:2px; }
-  .as-ops{ padding:8px 10px 10px; display:flex; gap:8px; align-items:center; }
-  .as-ops a{ font-size:11px; color:var(--text2); text-decoration:none; }
-  .as-ops a:hover{ color:var(--text); }
-  .as-ops .btn{ margin-left:auto; }
-  .as-sec{ font-size:12px; color:var(--text3); margin:18px 0 10px; }
-  .as-empty{ color:var(--text3); font-size:13px; padding:20px 0; text-align:center; }
-  /* 详情弹窗 */
-  .det-modal{ position:fixed; inset:0; z-index:999; background:rgba(5,5,8,.86); display:flex;
-    align-items:center; justify-content:center; padding:24px; }
-  .det-modal[hidden]{ display:none; }
-  .det-box{ position:relative; width:min(880px, 96vw); max-height:92vh; overflow:auto; background:#17171b;
-    border:1px solid var(--line2); border-radius:16px; padding:18px; }
-  .det-close{ position:absolute; top:10px; right:10px; background:#26262a; border:1px solid var(--line2);
-    color:var(--text); width:30px; height:30px; border-radius:8px; cursor:pointer; font-size:14px; z-index:2; }
-  .det-close:hover{ background:#2e2e33; }
-  .det-media{ display:flex; justify-content:center; margin-bottom:14px; }
-  .det-media video{ max-width:100%; max-height:56vh; border-radius:10px; background:#000; }
-  .det-media img{ max-width:100%; max-height:56vh; border-radius:10px; }
-  .det-meta{ display:flex; flex-direction:column; gap:8px; font-size:13px; }
-  .det-row{ display:flex; gap:10px; }
-  .det-row .k{ flex:none; width:76px; color:var(--text3); font-size:12px; }
-  .det-row .v{ flex:1; color:var(--text); word-break:break-all; white-space:pre-wrap; }
-  .det-row .v.prompt{ background:#141416; border:1px solid var(--line); border-radius:8px; padding:10px 12px;
-    max-height:160px; overflow:auto; line-height:1.7; }
+  .hint{ font-size:11.5px; color:var(--text3); margin-top:10px; }
 </style>
 </head>
 <body>
@@ -142,34 +102,18 @@
     <div class="tbl-wrap">
       <table>
         <thead><tr>
-          <th>用户名</th><th>密码</th><th>状态</th><th>登录次数</th><th>生成图</th><th>生成视频</th><th>画布数</th><th>操作</th>
+          <th>用户名（点击进入详情）</th><th>密码</th><th>状态</th><th>登录次数</th><th>生成图</th><th>生成视频</th><th>画布数</th><th>操作</th>
         </tr></thead>
         <tbody id="user-tbody"></tbody>
       </table>
     </div>
-  </section>
-  <section class="card" id="works-section">
-    <h2>生成作品规整（点素材可看生成时间与提示词）</h2>
-    <div class="row" style="margin-bottom:12px">
-      <select id="as-user" class="inp"></select>
-      <button id="as-refresh" class="btn">刷新列表</button>
-    </div>
-    <div id="as-chips" class="chips"></div>
-    <div id="as-list" class="as-list"></div>
+    <div class="hint">点用户名 → 新标签页打开该用户的详细界面（图片/视频生成记录切换查看、提示词、使用次数）。</div>
   </section>
 </div>
 
-<div id="det-modal" class="det-modal" hidden>
-  <div class="det-box">
-    <button class="det-close" id="det-close" title="关闭">✕</button>
-    <div id="det-media" class="det-media"></div>
-    <div id="det-meta" class="det-meta"></div>
-  </div>
-</div>
-
-<script src="js/utils.js?v=20261006a"></script>
-<script src="js/cloud.js?v=20261006a"></script>
-<script src="js/auth.js?v=20261006a"></script>
-<script src="js/admin.js?v=20261006a"></script>
+<script src="js/utils.js?v=20261007a"></script>
+<script src="js/cloud.js?v=20261007a"></script>
+<script src="js/auth.js?v=20261007a"></script>
+<script src="js/admin.js?v=20261007a"></script>
 </body>
 </html>

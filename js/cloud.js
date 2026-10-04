@@ -99,6 +99,21 @@
     return false;
   }
 
+  /* 按前缀删除整批文件（GitHub API 不支持删目录，逐个删除；目录会在最后一个文件删除后自动消失） */
+  async function delTree(prefix) {
+    const x = await gh('/git/trees/' + CFG.branch + '?recursive=1');
+    const tree = (x && x.data && x.data.tree) ? x.data.tree : [];
+    let n = 0;
+    for (const it of tree) {
+      if (it.type === 'blob' && String(it.path).startsWith(prefix)) {
+        const ok = await delFile(it.path);
+        if (!ok) throw new Error('删除 ' + it.path + ' 失败（HTTP 错误）');
+        n++;
+      }
+    }
+    return n;
+  }
+
   /* raw 读取（缓存戳防 CDN 陈旧） */
   async function raw(path, t) {
     const r = await fetch(RAW + '/' + path + '?t=' + (t || Date.now()));
@@ -348,6 +363,7 @@
     getSHA,
     putFile,
     delFile,
+    delTree,
     raw,
     utf8b64,
     b64utf8,

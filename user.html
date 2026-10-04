@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>用户详情 · 无限画布后台</title>
+<style>
+  :root{ --bg:#111113; --panel:#1c1c1f; --line:#2a2a2e; --line2:#3a3a40;
+    --text:#e8e6e3; --text2:#9a9890; --text3:#5c5a55; }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  body{ background:var(--bg); color:var(--text); font:14px/1.6 -apple-system, "Microsoft YaHei", sans-serif; min-height:100vh; }
+  .wrap{ max-width:1080px; margin:0 auto; padding:20px 20px 60px; }
+  .bar{ display:flex; align-items:center; justify-content:space-between; padding:10px 4px 18px; gap:12px; flex-wrap:wrap; }
+  .bar .left{ display:flex; align-items:center; gap:12px; }
+  .back{ font-size:12.5px; color:var(--text3); text-decoration:none; border:1px solid var(--line2);
+    padding:5px 12px; border-radius:8px; }
+  .back:hover{ color:var(--text); border-color:#5a5a60; }
+  .uname{ font-size:20px; font-weight:700; letter-spacing:1px; }
+  .tag{ font-size:11px; color:#e8d8b0; border:1px solid rgba(216,192,142,.4); border-radius:99px; padding:1px 8px; margin-left:8px; vertical-align:2px; }
+  .st-disabled{ color:#ff8ba7; font-size:12px; border:1px solid rgba(255,139,167,.4); border-radius:99px; padding:1px 8px; margin-left:8px; }
+  .card{ background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:20px; margin-bottom:16px; }
+  h2{ font-size:13.5px; font-weight:600; color:var(--text2); margin-bottom:12px; letter-spacing:1px; }
+  .use-grid{ display:flex; flex-wrap:wrap; gap:10px; }
+  .use{ background:#141416; border:1px solid var(--line); border-radius:10px; padding:12px 18px;
+    display:flex; flex-direction:column; align-items:center; gap:3px; min-width:92px; }
+  .use b{ font-size:21px; color:#e8d8b0; }
+  .use span{ font-size:11px; color:var(--text3); }
+  .use.wide{ min-width:150px; }
+  .tabs{ display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap; }
+  .tab{ background:#1c1c20; border:1px solid var(--line); color:var(--text3); border-radius:99px;
+    padding:7px 16px; font-size:13px; cursor:pointer; transition:all .15s; }
+  .tab.on{ color:#16161a; background:#e8d8b0; border-color:transparent; font-weight:600; }
+  .tab b{ font-weight:600; }
+  .list{ display:grid; grid-template-columns:repeat(auto-fill, minmax(230px, 1fr)); gap:12px; }
+  .item{ background:#141416; border:1px solid var(--line); border-radius:10px; overflow:hidden;
+    display:flex; flex-direction:column; }
+  .item .mv{ width:100%; aspect-ratio:16/10; object-fit:cover; background:#000; display:block; cursor:zoom-in; }
+  .item .im{ width:100%; aspect-ratio:16/10; object-fit:cover; display:block; background:#000; cursor:zoom-in; }
+  .item .ph{ width:100%; aspect-ratio:16/10; display:flex; align-items:center; justify-content:center; color:var(--text3); font-size:12px; }
+  .info{ padding:9px 10px 4px; font-size:11px; color:var(--text3); display:flex; flex-direction:column; gap:3px; }
+  .name{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text2); }
+  .time{ font-size:10.5px; }
+  .kind{ font-size:10.5px; }
+  .kind.v{ color:#f0954a; } .kind.i{ color:#e07bc4; } .kind.o{ color:var(--text3); }
+  .prompt{ font-size:11px; color:var(--text2); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+    overflow:hidden; line-height:1.5; margin-top:2px; }
+  .hist{ font-size:10px; color:var(--text3); border:1px solid var(--line2); border-radius:99px; padding:0 6px; margin-left:6px; }
+  .ops{ padding:8px 10px 10px; display:flex; gap:8px; align-items:center; }
+  .ops a{ font-size:11px; color:var(--text2); text-decoration:none; }
+  .ops a:hover{ color:var(--text); }
+  .btn{ background:#26262a; border:1px solid var(--line2); color:var(--text); padding:5px 11px;
+    border-radius:8px; cursor:pointer; font-size:12px; transition:all .15s; margin-left:auto; }
+  .btn:hover{ background:#2e2e33; }
+  .btn.danger{ border-color:#5c2a35; color:#f87171; }
+  .btn.danger:hover{ background:#3d1f2b; color:#ff8ba7; }
+  .empty{ color:var(--text3); font-size:13px; padding:26px 0; text-align:center; }
+  .sec{ font-size:12px; color:var(--text3); margin:16px 0 10px; }
+  /* 详情弹窗 */
+  .modal{ position:fixed; inset:0; z-index:999; background:rgba(5,5,8,.86); display:flex;
+    align-items:center; justify-content:center; padding:24px; }
+  .modal[hidden]{ display:none; }
+  .mbox{ position:relative; width:min(880px, 96vw); max-height:92vh; overflow:auto; background:#17171b;
+    border:1px solid var(--line2); border-radius:16px; padding:18px; }
+  .mclose{ position:absolute; top:10px; right:10px; background:#26262a; border:1px solid var(--line2);
+    color:var(--text); width:30px; height:30px; border-radius:8px; cursor:pointer; font-size:14px; z-index:2; }
+  .mclose:hover{ background:#2e2e33; }
+  .mmedia{ display:flex; justify-content:center; margin-bottom:14px; }
+  .mmedia video{ max-width:100%; max-height:56vh; border-radius:10px; background:#000; }
+  .mmedia img{ max-width:100%; max-height:56vh; border-radius:10px; }
+  .mmeta{ display:flex; flex-direction:column; gap:8px; font-size:13px; }
+  .mrow{ display:flex; gap:10px; }
+  .mrow .k{ flex:none; width:76px; color:var(--text3); font-size:12px; }
+  .mrow .v{ flex:1; color:var(--text); word-break:break-all; white-space:pre-wrap; }
+  .mrow .v.prompt{ background:#141416; border:1px solid var(--line); border-radius:8px; padding:10px 12px;
+    max-height:160px; overflow:auto; line-height:1.7; }
+  .mrow a{ color:var(--text2); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="bar">
+    <div class="left">
+      <a class="back" href="admin.html">← 返回后台</a>
+      <span class="uname" id="u-name">…</span>
+      <span id="u-tag-container"></span>
+    </div>
+    <span id="u-created" style="font-size:12px;color:var(--text3)"></span>
+  </header>
+
+  <section class="card">
+    <h2>使用情况</h2>
+    <div class="use-grid" id="u-use"></div>
+  </section>
+
+  <section class="card">
+    <h2>生成记录（点击素材看大图/播放与提示词）</h2>
+    <div class="tabs" id="u-tabs">
+      <button class="tab on" data-tab="all">全部 <b id="c-all">0</b></button>
+      <button class="tab" data-tab="image">图片 <b id="c-img">0</b></button>
+      <button class="tab" data-tab="video">视频 <b id="c-vid">0</b></button>
+    </div>
+    <div id="u-list" class="list"><div class="empty">加载中…</div></div>
+  </section>
+</div>
+
+<div id="u-modal" class="modal" hidden>
+  <div class="mbox">
+    <button class="mclose" id="m-close" title="关闭">✕</button>
+    <div id="m-media" class="mmedia"></div>
+    <div id="m-meta" class="mmeta"></div>
+  </div>
+</div>
+
+<script src="js/utils.js?v=20261007a"></script>
+<script src="js/cloud.js?v=20261007a"></script>
+<script src="js/auth.js?v=20261007a"></script>
+<script src="js/user.js?v=20261007a"></script>
+</body>
+</html>

@@ -31,13 +31,21 @@
   }
 
   /* ---------- 账号表读写 ---------- */
-  async function readAccounts() {
+  /* 读 JSON 文件：优先 GitHub API（实时、无 CDN 延迟），失败回退 raw CDN */
+  async function apiJson(path) {
     try {
-      const t = await G.raw(ACC_PATH);
-      if (!t) return [];
-      const m = JSON.parse(t);
-      return (m && Array.isArray(m.accounts)) ? m.accounts : [];
-    } catch (e) { return []; }
+      const r = await G.readJSONAPI(path);
+      if (r && r.m) return r.m;
+    } catch (e) {}
+    try {
+      const t = await G.raw(path);
+      if (!t) return null;
+      return JSON.parse(t);
+    } catch (e) { return null; }
+  }
+  async function readAccounts() {
+    const m = await apiJson(ACC_PATH);
+    return (m && Array.isArray(m.accounts)) ? m.accounts : [];
   }
   async function writeAccounts(mutate) {
     return G.mergeJSON(ACC_PATH, (m) => {
@@ -201,12 +209,10 @@
     if (!ok) throw new Error('写入失败，请重试');
   }
   async function canvasCount(username) {
-    try {
-      const t = await G.raw('users/' + encodeURIComponent(username) + '/manifest.json');
-      if (!t) return 0;
-      const m = JSON.parse(t);
-      return (m && Array.isArray(m.projects)) ? m.projects.length : 0;
-    } catch (e) { return 0; }
+    const u = normName(username);
+    if (!u) return 0;
+    const m = await apiJson('users/' + u + '/manifest.json');
+    return (m && Array.isArray(m.projects)) ? m.projects.length : 0;
   }
 
   /* ---------- 使用统计：users/<用户名>/stats.json（登录次数 + 各类生成次数） ---------- */
@@ -228,11 +234,7 @@
   async function adminStats(username) {
     const u = normName(username);
     if (!u) return null;
-    try {
-      const t = await G.raw('users/' + u + '/stats.json');
-      if (!t) return null;
-      return JSON.parse(t);
-    } catch (e) { return null; }
+    return apiJson('users/' + u + '/stats.json');
   }
   /* 列出某用户的资产（图片/视频），后台规整用 */
   async function adminAssets(username) {
@@ -257,12 +259,8 @@
   async function adminGenlog(username) {
     const u = normName(username);
     if (!u) return { items: [] };
-    try {
-      const t = await G.raw('users/' + u + '/genlog.json');
-      if (!t) return { items: [] };
-      const m = JSON.parse(t);
-      return (m && Array.isArray(m.items)) ? m : { items: [] };
-    } catch (e) { return { items: [] }; }
+    const m = await apiJson('users/' + u + '/genlog.json');
+    return (m && Array.isArray(m.items)) ? m : { items: [] };
   }
   /* 删除某用户的资产文件，并同步移除生成记录里的对应条目 */
   async function adminDeleteAsset(username, name) {

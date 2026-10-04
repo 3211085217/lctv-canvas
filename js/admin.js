@@ -50,6 +50,7 @@
         <td class="ops">
           <button class="btn sm" data-op="toggle" data-u="${esc(u.u)}">${u.disabled ? '启用' : '禁用'}</button>
           <button class="btn sm" data-op="pwd" data-u="${esc(u.u)}">重置密码</button>
+          ${u.role !== 'admin' ? `<button class="btn sm danger" data-op="deluser" data-u="${esc(u.u)}">删除用户</button>` : ''}
         </td></tr>`;
     });
     $('#user-tbody').innerHTML = rows.join('');
@@ -78,6 +79,13 @@
         busy('处理中…');
         await A.adminSetPassword(u, pw);
         alert('已重置「' + u + '」的密码');
+      } else if (b.dataset.op === 'deluser') {
+        if (!confirm('确定永久删除用户「' + u + '」？\n将同时删除 TA 的全部画布、图片、视频、使用统计和生成记录，且无法恢复。')) return;
+        const typed = prompt('此操作不可恢复。请再次输入「' + u + '」确认删除：');
+        if (typed !== u) { alert('输入不一致，已取消删除'); return; }
+        busy('删除中…');
+        await A.adminDeleteUser(u);
+        alert('已彻底删除用户「' + u + '」（画布/资产/记录零残留）');
       }
       await refresh();
     } catch (err) {

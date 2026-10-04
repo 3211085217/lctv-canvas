@@ -1,11 +1,13 @@
 /* =====================================================
- * cloud.js — 云端协同层（网页版）
- * 数据仓库：3211085217/lctv-canvas-data（公开仓库，共享数据池）
- *   projects/<id>.json   画布工程文件
- *   manifest.json        画布索引（权威列表，保存时更新）
- *   assets/<file>        媒体资产（图片/视频/音频）
+ * cloud.js — 云端协同层（网页版 · 按账号隔离）
+ * 数据仓库：3211085217/lctv-canvas-data（公开仓库）
+ *   accounts.json                    账号表（用户名、盐化哈希、角色、禁用状态）
+ *   users/<用户名>/manifest.json     该用户的画布索引
+ *   projects/<用户名>/<id>.json      该用户的画布工程
+ *   assets/<用户名>/<file>           该用户的媒体资产
+ * 每个人只能读写自己账号目录下的数据（前端约定 + 登录门强制）
  * 读取走 raw.githubusercontent（国内可直连，带缓存戳）
- * 写入走 GitHub Contents API（内置令牌）
+ * 写入走 GitHub Contents API（内置共享令牌）
  * ===================================================== */
 (function () {
   const CFG = {
@@ -18,6 +20,11 @@
   const API = 'https://api.github.com/repos/' + CFG.owner + '/' + CFG.repo;
 
   let _lastErr = null;   // 诊断：最近一次写入失败原因
+
+  /* 当前登录用户名；未登录返回空串 */
+  function uname() {
+    try { return (window.LC && LC.Auth && LC.Auth.currentName()) || ''; } catch (e) { return ''; }
+  }
 
   /* ---------- 基础工具 ---------- */
   const utf8b64 = (str) => btoa(unescape(encodeURIComponent(str)));
@@ -99,36 +106,25 @@
     return r.text();
   }
 
-  /* ---------- 画布 ---------- */
-  async function readManifest() {
-    const t = await raw('manifest.json');
-    if (!t) return { projects: [] };
-    try {
-      const m = JSON.parse(t);
-      return (m && Array.isArray(m.projects)) ? m : { projects: [] };
-    } catch (e) { return { projects: [] }; }
-  }
-
-  /* 权威读取 manifest（走 API，拿到最新内容 + sha），写路径专用，避免 raw CDN 陈旧覆盖 */
-  async function readManifestAPI() {
-    const x = await gh('/contents/manifest.json');
+  /* ---------- 通用 JSON 读改写合并（accounts.json / 用户 manifest 共用） ---------- */
+  async function readJSONAPI(path) {
+    const x = await gh('/contents/' + path);
     if (x.code === 200 && x.data && x.data.content && x.data.sha) {
       try {
         const m = JSON.parse(b64utf8(x.data.content));
-        if (m && Array.isArray(m.projects)) return { m, sha: x.data.sha };
+        return { m, sha: x.data.sha };
       } catch (e) {}
     }
-    return { m: { projects: [] }, sha: null };
+    return { m: null, sha: null };
   }
 
-  /* 读-改-写合并 manifest：基于每次拿到的最新内容 + sha 提交，避免并发丢更新；冲突/网络失败时重读重试 */
-  async function mergeManifest(mutate) {
+  async function mergeJSON(path, mutate) {
     for (let i = 0; i < 3; i++) {
-      const { m, sha } = await readManifestAPI();
-      mutate(m);
-      const body = { message: 'update manifest', content: utf8b64(JSON.stringify(m)) };
+      const { m, sha } = await readJSONAPI(path);
+      const obj = mutate(m);
+      const body = { message: 'update ' + path, content: utf8b64(JSON.stringify(obj)) };
       if (sha) body.sha = sha;
-      const x = await gh('/contents/manifest.json', 'PUT', body);
+      const x = await gh('/contents/' + path, 'PUT', body);
       if (x.code === 200 || x.code === 201) return true;
       if (x.code === 422 || x.code === 409) continue;   // 他人并发改动：读最新再来
       if (x.code === 403) throw new Error('云端写入频率过高，请稍后再试');
@@ -137,17 +133,34 @@
     return false;
   }
 
-  /* 列表：manifest + 云端文件树合并 → 过滤已删文件但仍留索引的幽灵条目（删不掉的画布） */
-  async function list() {
+  /* ---------- 用户画布数据路径 ---------- */
+  const isLogged = () => { const u = uname(); if (!u) { const e = new Error('未登录'); e.notLogged = true; throw e; } return u; };
+  async function userManifest() {
+    const u = uname();
+    if (!u) return { projects: [] };
+    const t = await raw('users/' + u + '/manifest.json');
+    if (!t) return { projects: [] };
     try {
+      const m = JSON.parse(t);
+      return (m && Array.isArray(m.projects)) ? m : { projects: [] };
+    } catch (e) { return { projects: [] }; }
+  }
+
+  /* ---------- 画布 ---------- */
+  /* 列表：当前用户 manifest + 云端文件树合并 → 过滤已删文件但仍留索引的幽灵条目 */
+  async function list() {
+    if (!uname()) return [];
+    try {
+      const u = uname();
+      const prefix = 'projects/' + u + '/';
       const [m, tree] = await Promise.all([
-        readManifest(),
+        userManifest(),
         (async () => {
           const x = await gh('/git/trees/' + CFG.branch + '?recursive=1');
           const set = new Set();
           ((x && x.data && x.data.tree) || []).forEach((it) => {
-            if (it.type === 'blob' && it.path.startsWith('projects/') && it.path.endsWith('.json')) {
-              set.add(it.path.slice('projects/'.length, -'.json'.length));
+            if (it.type === 'blob' && it.path.startsWith(prefix) && it.path.endsWith('.json')) {
+              set.add(it.path.slice(prefix.length, -'.json'.length));
             }
           });
           return set;
@@ -157,53 +170,67 @@
     } catch (e) { return []; }
   }
 
-  /* 保存画布：工程文件 + 索引并行提交（失败抛错由调用方兜底缓存） */
+  /* 保存画布：工程文件 + 该用户索引并行提交（失败抛错由调用方兜底缓存） */
   async function save(id, obj) {
-    const pFile = putFile('projects/' + id + '.json', JSON.stringify(obj, null, 0), 'save ' + (obj.name || id));
-    const pManifest = mergeManifest((m) => {
+    const u = isLogged();
+    const pFile = putFile('projects/' + u + '/' + id + '.json', JSON.stringify(obj, null, 0), 'save ' + (obj.name || id));
+    const pManifest = mergeJSON('users/' + u + '/manifest.json', (m) => {
+      const mm = (m && Array.isArray(m.projects)) ? m : { projects: [] };
       const now = new Date().toLocaleString('zh-CN', { hour12: false });
-      const old = (m.projects || []).filter((p) => p.id !== id);
-      m.projects = [{ id, name: obj.name || '未命名画布', createdAt: obj.createdAt || now, updatedAt: now }, ...old].slice(0, 200);
+      const old = (mm.projects || []).filter((p) => p.id !== id);
+      mm.projects = [{ id, name: obj.name || '未命名画布', createdAt: obj.createdAt || now, updatedAt: now }, ...old].slice(0, 200);
+      return mm;
     });
     const [okFile, okManifest] = await Promise.all([pFile, pManifest]);
     if (!okFile) throw new Error('云端保存失败');
-    if (!okManifest) console.warn('[Cloud.save] manifest 更新失败（不影响画布保存）');
+    if (!okManifest) console.warn('[Cloud.save] 用户索引更新失败（不影响画布保存）');
   }
 
-  /* 载入画布：云端优先，404 返回 null */
+  /* 载入画布：当前用户目录，404 返回 null */
   async function load(id) {
-    const t = await raw('projects/' + id + '.json');
+    const u = uname();
+    if (!u) return null;
+    const t = await raw('projects/' + u + '/' + id + '.json');
     if (!t) return null;
     try { return JSON.parse(t); } catch (e) { return null; }
   }
 
-  /* 删除画布：删工程文件（带 sha）+ 从 manifest 移除；失败抛错由调用方如实提示 */
+  /* 删除画布：删工程文件（带 sha）+ 从该用户索引移除 */
   async function del(id) {
-    const okFile = await delFile('projects/' + id + '.json');
+    const u = isLogged();
+    const okFile = await delFile('projects/' + u + '/' + id + '.json');
     if (!okFile) throw new Error('云端删除失败');
-    await mergeManifest((m) => { m.projects = (m.projects || []).filter((p) => p.id !== id); });
+    await mergeJSON('users/' + u + '/manifest.json', (m) => {
+      const mm = (m && Array.isArray(m.projects)) ? m : { projects: [] };
+      mm.projects = (mm.projects || []).filter((p) => p.id !== id);
+      return mm;
+    });
   }
 
-  /* ---------- 资产 ---------- */
+  /* ---------- 资产（当前用户目录） ---------- */
   async function assets() {
+    const u = uname();
+    if (!u) return [];
     const x = await gh('/git/trees/' + CFG.branch + '?recursive=1');
     const tree = (x && x.data && x.data.tree) ? x.data.tree : [];
+    const prefix = 'assets/' + u + '/';
     const out = [];
     tree.forEach((it) => {
-      if (it.type !== 'blob' || !String(it.path).startsWith('assets/')) return;
-      const name = it.path.slice('assets/'.length);
+      if (it.type !== 'blob' || !String(it.path).startsWith(prefix)) return;
+      const name = it.path.slice(prefix.length);
       out.push({ name, url: RAW + '/' + it.path, size: it.size });
     });
     out.sort((a, b) => b.size - a.size || String(a.name).localeCompare(String(b.name)));
     return out;
   }
 
-  /* 上传文件/Blob 到云端资产，返回 {url, name, size}（url 为 raw 直读地址） */
+  /* 上传文件/Blob 到当前用户资产，返回 {url, name, size}（url 为 raw 直读地址） */
   async function uploadAsset(blob, name) {
+    const u = isLogged();
     const safeName = String(name || ('file_' + Date.now())).replace(/[\/\\?#%]/g, '_'); // 仓库路径安全
     const buf = await blobToAB(blob);
     const b64 = abToB64(buf);
-    const path = 'assets/' + safeName;
+    const path = 'assets/' + u + '/' + safeName;
     const body0 = { message: 'upload ' + safeName, content: b64 };
     let sha = await getSHA(path);
     for (let i = 0; i < 2; i++) {
@@ -237,13 +264,15 @@
     return btoa(bin);
   }
 
-  /* 删除资产（参数为 raw URL 或仓库路径） */
+  /* 删除当前用户资产（参数为 raw URL 或仓库路径） */
   async function deleteAsset(ref) {
-    const s = String(ref || '');
-    const m = s.match(/lctv-canvas-data\/[^\/]+\/assets\/(.+)$/) || s.match(/^assets\/(.+)$/);
-    const name = m ? m[1] : null;
+    const u = isLogged();
+    const s = String(ref || '').split('?')[0];
+    let name = null;
+    const full = s.match(/lctv-canvas-data\/[^\/]+\/assets\/[^\/]+\/(.+)$/) || s.match(/^assets\/[^\/]+\/(.+)$/);
+    if (full) name = full[1];
     if (!name) return;
-    await delFile('assets/' + name);
+    await delFile('assets/' + u + '/' + name);
   }
 
   /* dataURL → 云端公网 URL（AI 模型需要公网素材） */
@@ -288,5 +317,20 @@
     aiTask,
     b64utf8,
     _lastErr: () => _lastErr,
+  };
+  /* 通用 GitHub 工具（auth.js / admin 后台共用） */
+  LC.GH = {
+    OWNER: CFG.owner,
+    REPO: CFG.repo,
+    RAW,
+    gh,
+    getSHA,
+    putFile,
+    delFile,
+    raw,
+    utf8b64,
+    b64utf8,
+    readJSONAPI,
+    mergeJSON,
   };
 })();

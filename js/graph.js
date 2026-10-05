@@ -76,10 +76,19 @@
     props: () => ({ prompt: '', mode: 'grid', model: '', aspect: '1:1', grid: '3x3', light: '电影·低饱和' }),
   });
 
+  /* 视频超清：输入只收视频（AI视频 / 成片导出 / 超清链），送超清模型增强后输出高清视频
+     盒子与视频节点同规格（560 宽 + 16:9 显示框），无提示词输入，选择控件在底部浮动面板 */
+  reg('upscale', {
+    icon: 'upscale', color: '#8b5cf6', name: '视频超清', category: 'ai', w: 560,
+    inputs: IN(), outputs: OUT(),
+    // 超分参数默认档：清晰度 1080p · 不插帧 · 标准版 · AI视频 · 自然风格（面板下拉可改）
+    props: () => ({ model: '', resolution: '1080p', fps: 'keep', toolVersion: 'standard', scene: 'aigc', enhanceStyle: 'natural' }),
+  });
+
   /* 节点库面板分类 */
   const LIB = {
     basic: [['script', '脚本 / 分镜'], ['text', '文本'], ['image', '图片 / 生图'], ['video', '视频'], ['audio', '音频']],
-    ai: [['imageGrid', '九宫格分镜'], ['stage', '3D 导演台'], ['subtitle', 'AI 字幕'], ['export', '拼接导出']],
+    ai: [['imageGrid', '九宫格分镜'], ['stage', '3D 导演台'], ['subtitle', 'AI 字幕'], ['upscale', '视频超清'], ['export', '拼接导出']],
     tool: [['check', '合规校验']],
   };
 
@@ -161,8 +170,21 @@
     /* 端口引用解析 */
     portRef(ref) { return { node: this.nodes.get(ref.n), portId: ref.p }; }
 
+    /* 连线合法性：视频超清节点只接受「会产出视频」的上游（AI 视频 / 成片导出 / 超清链，或已有视频输出的节点） */
+    canLink(fromId, toId) {
+      const to = this.nodes.get(toId);
+      if (to && to.type === 'upscale') {
+        const from = this.nodes.get(fromId);
+        const VIDEO_SRC = ['video', 'export', 'upscale'];
+        const ok = !!from && (VIDEO_SRC.includes(from.type) || from.state?.output?.kind === 'video');
+        if (!ok) return { ok: false, reason: '视频超清节点只能连接视频（AI 视频 / 成片导出 / 超清输出）' };
+      }
+      return { ok: true };
+    }
+
     addEdge(from, to) {
       if (from.n === to.n) return null;
+      if (!this.canLink(from.n, to.n).ok) return null;
       if (this.edges.some((e) => e.from.n === from.n && e.from.p === from.p && e.to.n === to.n && e.to.p === to.p)) return null;
       const e = { id: U.uid('e'), from: { ...from }, to: { ...to } };
       this.edges.push(e);

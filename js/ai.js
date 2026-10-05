@@ -1113,6 +1113,338 @@
   }
 
   /* =====================================================
+   * 22Ai 海螺 H3 参考生（hailuo-h3-cankaosheng，站内名「h3特价」）——独立模块
+   *   创建：POST {url 规范化到 /v1}/media/generate  body { model, prompt, params }
+   *   查询：GET  {url 规范化到 /v1}/media/status?task_id=   → {state, is_final, result_url}
+   *   参数：params.images 为参考图（统一公网 URL 直传，≥1 张）；duration/resolution 必填
+   *   （22Ai 内联单文件 10MB 上限严格，公网 URL 方式不受限——接口报错原文建议）
+   * ===================================================== */
+  async function h3tkVideo(cfg, params, onProgress) {
+    // 地址兼容两种写法：已带 /v1 直接用；只给了域名（如 api.lk888.ai）则补 /v1，
+    // 否则会打出 /v1/v1/... 导致上游收不到请求
+    const raw = (cfg.url || 'https://api.lk888.ai/v1').replace(/\/+$/, '');
+    const base = /\/v1$/.test(raw) ? raw : raw + '/v1';
+    const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.key };
+    onProgress?.(3);
+    // 仅参考生：把参考图/首尾帧槽位的图统一当参考图用（该模型无首尾帧语义），必须 ≥1 张
+    const refImgs = [...(params.refImages || []), ...(params.images || [])].filter(Boolean).slice(0, 9);
+    if (!refImgs.length) throw new Error('「h3特价」为参考生模型，必须上传至少 1 张参考图，不支持纯文字生成');
+    // 参考图统一走公网 URL（原文件无损）：公网 URL 原样透传；本地 dataURL/相对路径上传图床
+    const toPublic = async (x) => {
+      if (/^https?:\/\//i.test(x)) return x;
+      let d = x;
+      if (String(x).startsWith('/')) { try { d = await U.urlToDataURL(x); } catch (e) { return ''; } }
+      if (!/^data:/i.test(d)) return '';
+      return await toPublicUrl(d, { required: true });
+    };
+    const imgUrls = (await Promise.all(refImgs.map(toPublic))).filter(Boolean);
+    if (!imgUrls.length) throw new Error('参考图读取失败，无法生成');
+    const resMap = { '768P': '768P', '1080P': '1080P', '2K': '2K', '4K': '4K' };
+    const pv = {
+      resolution: resMap[params.resolution] || '768P',
+      aspect_ratio: params.aspect || 'adaptive',
+      duration: String(Math.min(15, Math.max(4, Math.floor(Number(params.duration) || 5)))),
+      images: imgUrls,
+    };
+    const prompt = [params.prompt || '', ...stylePrompts(params)].filter(Boolean).join('，');
+    onProgress?.(8);
+    const create = await fetch(base + '/media/generate', {
+      method: 'POST', headers,
+      body: JSON.stringify({ model: cfg.modelId, prompt, params: pv }),
+    });
+    const t = await create.text().catch(() => '');
+    let cj = null;
+    try { cj = t ? JSON.parse(t) : null; } catch (e) {}
+    if (!create.ok || (cj && cj.code != null && cj.code !== 200)) {
+      const detail = (cj && (cj.msg || cj.message)) ||
+        (cj && cj.data && (cj.data.详情 || cj.data.detail)) ||
+        (t ? t.slice(0, 160) : '');
+      // 渠道分组被下线：平台侧配置问题，给出可操作指引
+      if (/无可用渠道分组|渠道分组当前均不可用|补勾其它线路/.test(String(detail))) {
+        throw new Error('「h3特价」可用线路已被平台下线：请到 22Ai 开放 API 控制台 → 密钥渠道配置，为这把密钥补勾活跃线路（如「官方直连」「MC-H3特价」），无需改代码，勾好重试即可');
+      }
+      throw new Error('创建视频任务失败 HTTP ' + create.status + (detail ? ' · ' + String(detail).slice(0, 160) : ''));
+    }
+    const taskId = (cj && cj.data && cj.data.task_id != null) ? cj.data.task_id
+      : ((cj && cj.task_id != null) ? cj.task_id : null);
+    if (taskId == null) throw new Error('接口未返回 task_id：' + JSON.stringify(cj).slice(0, 200));
+    // 注册第三方任务：刷新后据此续轮询原任务（不重新生成）
+    noteExtTask({ proto: 'h3tk', base, modelId: cfg.modelId, modelName: cfg.name, kind: 'video', extTaskId: taskId, duration: pv.duration, resolution: pv.resolution, ratio: pv.aspect_ratio });
+
+    /* 轮询：5s 间隔，上限 60 分钟；state 为 pending/running/success/failed，is_final 为终态 */
+    let resultURL = '';
+    for (let i = 0; i < 720; i++) {
+      await U.sleep(5000);
+      let st = null;
+      try {
+        const res = await fetch(base + '/media/status?task_id=' + encodeURIComponent(taskId), { headers });
+        if (res.ok) st = await res.json();
+      } catch (e) { /* 网络抖动：继续轮询 */ }
+      if (!st) continue;
+      const pct = Number(String(st.progress || '').replace('%', '')) || 0;
+      onProgress?.(pct ? Math.min(90, 8 + pct * 0.85) : Math.min(90, 8 + i * 0.15));
+      if (st.state === 'failed' || st.error) {
+        throw new Error('视频任务失败：' + (st.error || st.state || '未知原因（费用已自动退款）'));
+      }
+      if (st.is_final === true && st.state === 'success') {
+        resultURL = st.result_url || '';
+        if (resultURL) break;
+      }
+    }
+    if (!resultURL) throw new Error('视频任务超时（60 分钟）');
+    onProgress?.(93);
+
+    /* 取回成片 → dataURL + 首帧封面：带超时与重试 */
+    let blob = null;
+    for (let a = 0; a < 3 && !blob; a++) {
+      try {
+        const ctl = new AbortController();
+        const tm = setTimeout(() => ctl.abort(), 180000);
+        const resp = await fetch(resultURL, { signal: ctl.signal });
+        blob = resp.ok ? await resp.blob() : null;
+        clearTimeout(tm);
+      } catch (e) { blob = null; }
+    }
+    if (!blob) throw new Error('成片下载失败（网络超时，任务实际已完成）。请重新运行节点，或直接用链接下载：' + resultURL);
+    const dataURL = await blobToDataURL(blob);
+    let frame = '';
+    try { frame = await videoFirstFrame(dataURL); } catch (e) { /* 首帧失败不阻塞 */ }
+    onProgress?.(100);
+    return {
+      kind: 'video', dataURL, blob,
+      frames: frame ? [frame] : [],
+      duration: Number(pv.duration),
+      meta: {
+        prompt: params.prompt, model: cfg.modelId, provider: 'lk888', mode: '参考生 · H3特价',
+        aspect: params.aspect, resolution: pv.resolution,
+        duration: Number(pv.duration), videoURL: resultURL, time: U.formatTime(),
+      },
+    };
+  }
+
+  /* =====================================================
+   * 视频超清（upscale 节点）：上游视频 → 超清模型增强 → 高清成片
+   *   22Ai 媒体协议：POST {url 规范化到 /v1}/media/generate  body { model, prompt, params:{ video_url } }
+   *   查询：GET  {base}/media/status?task_id=（与 h3特价 同款轮询，state/is_final/result_url）
+   *   视频无法 base64 内联，输入视频经 toPublicUrl 公网化
+   * ===================================================== */
+  async function upscaleVideo(cfg, params, onProgress) {
+    const vid = params.video;
+    if (!vid) throw new Error('视频超清节点需要连接一个视频节点');
+    if (!/lk888\.ai/i.test(cfg.url || '')) {
+      throw new Error('超清模型目前仅支持 22Ai(lk888) 接口：请在「设置 → 视频模型」配置超清模型（URL 指向 api.lk888.ai）');
+    }
+    const raw = (cfg.url || '').replace(/\/+$/, '');
+    const base = /\/v1$/.test(raw) ? raw : raw + '/v1';
+    const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.key };
+    onProgress?.(3);
+    const videoURL = await toPublicUrl(vid, { required: true });
+    onProgress?.(10);
+    const create = await fetch(base + '/media/generate', {
+      method: 'POST', headers,
+      body: JSON.stringify({
+        model: cfg.modelId,
+        prompt: params.prompt || '视频超清增强',
+        params: {
+          video_url: videoURL,
+          resolution: params.resolution || '1080p',
+          fps: params.fps || 'keep',
+          tool_version: params.toolVersion || 'standard',
+          scene: params.scene || 'aigc',
+          enhance_style: params.enhanceStyle || 'natural',
+        },
+      }),
+    });
+    const t = await create.text().catch(() => '');
+    let cj = null;
+    try { cj = t ? JSON.parse(t) : null; } catch (e) {}
+    if (!create.ok) throw new Error('创建超清任务失败 HTTP ' + create.status + (t ? ' · ' + t.slice(0, 160) : ''));
+    if (cj && cj.code != null && cj.code !== 200) {
+      throw new Error('创建超清任务失败：' + ((cj.msg || cj.message) || JSON.stringify(cj.data || {}).slice(0, 160)));
+    }
+    const taskId = (cj && cj.data && cj.data.task_id != null) ? cj.data.task_id
+      : ((cj && cj.task_id != null) ? cj.task_id : null);
+    if (taskId == null) throw new Error('接口未返回 task_id：' + JSON.stringify(cj).slice(0, 200));
+    // 注册第三方任务：刷新后据此续轮询原任务（不重新生成）
+    noteExtTask({ proto: 'upscale', base, modelId: cfg.modelId, modelName: cfg.name, kind: 'video', extTaskId: taskId });
+
+    /* 轮询：5s 间隔，上限 60 分钟 */
+    let resultURL = '';
+    for (let i = 0; i < 720; i++) {
+      await U.sleep(5000);
+      let st = null;
+      try {
+        const res = await fetch(base + '/media/status?task_id=' + encodeURIComponent(taskId), { headers });
+        if (res.ok) st = await res.json();
+      } catch (e) { /* 网络抖动：继续轮询 */ }
+      if (!st) continue;
+      const pct = Number(String(st.progress || '').replace('%', '')) || 0;
+      onProgress?.(pct ? Math.min(90, 10 + pct * 0.8) : Math.min(90, 10 + i * 0.12));
+      if (st.state === 'failed' || st.error) {
+        throw new Error('超清任务失败：' + (st.error || st.state || '未知原因'));
+      }
+      if (st.is_final === true && st.state === 'success') {
+        resultURL = st.result_url || '';
+        if (resultURL) break;
+      }
+    }
+    if (!resultURL) throw new Error('超清任务超时（60 分钟）');
+    onProgress?.(93);
+
+    /* 取回成片 → dataURL + 首帧封面（带超时与重试） */
+    let blob = null;
+    for (let a = 0; a < 3 && !blob; a++) {
+      try {
+        const ctl = new AbortController();
+        const tm = setTimeout(() => ctl.abort(), 180000);
+        const resp = await fetch(resultURL, { signal: ctl.signal });
+        blob = resp.ok ? await resp.blob() : null;
+        clearTimeout(tm);
+      } catch (e) { blob = null; }
+    }
+    if (!blob) throw new Error('超清成片下载失败（任务已完成）：' + resultURL);
+    const dataURL = await blobToDataURL(blob);
+    let frame = '';
+    try { frame = await videoFirstFrame(dataURL); } catch (e) { /* 首帧失败不阻塞 */ }
+    onProgress?.(100);
+    return {
+      kind: 'video', dataURL, blob,
+      frames: frame ? [frame] : [],
+      duration: Number(params.duration) || 0,
+      meta: {
+        model: cfg.modelId, provider: 'lk888', mode: '视频超清',
+        resolution: params.resolution || '1080p', fps: params.fps || 'keep',
+        toolVersion: params.toolVersion || 'standard',
+        videoURL: resultURL, time: U.formatTime(),
+      },
+    };
+  }
+
+  /* =====================================================
+   * StarCreate AI（starcreateai.com）Seedance 特价版（SEEDANCE_SD_2_5）——独立模块，不与 lk888/Ark 混用
+   *   创建：POST {base}/videos/tasks   body { model, prompt, client_request_id, duration, aspect_ratio, resolution, images? }
+   *   查询：GET  {base}/videos/tasks/{taskId} → status: PENDING/RUNNING/RECONCILING/SUCCEEDED/FAILED/CANCELLED
+   *   规则：时长固定 30s · 分辨率固定 720p · 画幅 6 选 1（9:16/3:4/4:3/16:9/21:9/1:1）· 参考图 ≤9（公网 HTTPS）· 按次计费
+   *   client_request_id 复用前端任务 ID：重复提交不重复扣费；202 RECONCILING 沿用原编号重试拿 taskId
+   * ===================================================== */
+  async function starVideo(cfg, params, onProgress, presetTaskId) {
+    const raw = (cfg.url || '').replace(/\/+$/, '');
+    const base = raw + '/videos/tasks';
+    const headers = { 'Content-Type': 'application/json', Authorization: 'Bearer ' + cfg.key };
+    const crid = String(presetTaskId || '').slice(0, 64) || U.uid('star');
+    const STAR_ASPECTS = ['9:16', '3:4', '4:3', '16:9', '21:9', '1:1'];
+    const aspect = STAR_ASPECTS.includes(params.aspect) ? params.aspect : '9:16';
+    // 参考图：公网 URL 原样透传；本地 dataURL/相对路径上传图床（本平台无内联素材一说）
+    const refImgs = [...(params.refImages || []), ...(params.images || [])].filter(Boolean).slice(0, 9);
+    const imgUrls = [];
+    for (const x of refImgs) {
+      if (/^https?:\/\//i.test(x)) { imgUrls.push(x); continue; }
+      let d = x;
+      if (String(x).startsWith('/')) { try { d = await U.urlToDataURL(x); } catch (e) { continue; } }
+      if (/^data:/i.test(d)) { try { imgUrls.push(await toPublicUrl(d, { required: true })); } catch (e) { /* 单张失败跳过 */ } }
+    }
+    const body = () => JSON.stringify({
+      model: cfg.modelId || 'SEEDANCE_SD_2_5',
+      prompt: params.prompt || '视频生成',
+      client_request_id: crid,
+      duration: 30,
+      aspect_ratio: aspect,
+      resolution: '720p',
+      ...(imgUrls.length ? { images: imgUrls } : {}),
+    });
+    onProgress?.(5);
+    // 创建：4xx 明确报错；429 退避重试；201 拿 taskId；202 进入核对重试
+    let cj = null;
+    for (let att = 0; att < 4; att++) {
+      if (att) await U.sleep(6000 + att * 4000);
+      let res = null, t = '';
+      try {
+        res = await fetch(base, { method: 'POST', headers, body: body() });
+        t = await res.text().catch(() => '');
+      } catch (e) { continue; }   // 网络异常：下一轮重试（沿用原编号，不重复扣费）
+      try { cj = t ? JSON.parse(t) : null; } catch (e) { cj = null; }
+      if (res.status === 401) throw new Error('StarCreate Key 无效：请在「设置 → 视频模型」填写正确的 API Key');
+      if (res.status === 402) throw new Error('StarCreate 余额不足（欢乐豆用完）：请到平台充值后重试');
+      if (res.status === 422) throw new Error('StarCreate 参数不符合要求：' + (((cj && cj.message) || t) || '').slice(0, 200));
+      if (res.status === 409) throw new Error('StarCreate 提交冲突：' + (((cj && cj.message) || t) || '').slice(0, 160));
+      if (res.status === 429) { await U.sleep((Number(res.headers.get('Retry-After')) || 8) * 1000); continue; }
+      if (cj && cj.taskId) break;
+      if (res.status !== 200 && res.status !== 201 && res.status !== 202) {
+        throw new Error('StarCreate 创建失败 HTTP ' + res.status + (t ? ' · ' + t.slice(0, 200) : ''));
+      }
+    }
+    let taskId = (cj && cj.taskId) || null;
+    // 202 / RECONCILING：沿用原 client_request_id 重试，确定后返回 taskId（绝不变号重提）
+    if (taskId == null) {
+      for (let i = 0; i < 8; i++) {
+        await U.sleep(8000);
+        let res = null, t = '';
+        try {
+          res = await fetch(base, { method: 'POST', headers, body: body() });
+          t = await res.text().catch(() => '');
+        } catch (e) { continue; }
+        let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) {}
+        if (j && j.taskId) { cj = j; taskId = j.taskId; break; }
+        if (res.status === 401) throw new Error('StarCreate Key 无效：请在「设置 → 视频模型」填写正确的 API Key');
+        if (res.status === 402) throw new Error('StarCreate 余额不足（欢乐豆用完）');
+        if (res.status === 409) throw new Error('StarCreate 提交冲突：' + (((j && j.message) || t) || '').slice(0, 160));
+      }
+      if (!taskId) throw new Error('StarCreate 任务核对超时（提交结果确认中），请稍后重试');
+    }
+    // 注册第三方任务：刷新后续轮询原任务（不重新扣费）
+    noteExtTask({ proto: 'star', base, modelId: cfg.modelId, modelName: cfg.name, kind: 'video', extTaskId: taskId, duration: 30, resolution: '720p', ratio: aspect });
+
+    /* 轮询：12s 间隔（平台建议 10~15s），上限 60 分钟 */
+    let contentUrl = '';
+    for (let i = 0; i < 300; i++) {
+      await U.sleep(12000);
+      let st = null;
+      try {
+        const res = await fetch(base + '/' + encodeURIComponent(taskId), { headers });
+        if (res.ok) st = await res.json();
+        else if (res.status === 429) { await U.sleep(8000); }
+      } catch (e) { /* 网络抖动：继续轮询 */ }
+      if (!st) continue;
+      onProgress?.(Math.min(92, 10 + Number(st.progress || 0) * 0.82));
+      if (st.status === 'FAILED' || st.status === 'CANCELLED') {
+        throw new Error('StarCreate 任务失败：' + (st.errorMessage || st.errorCode || st.status));
+      }
+      if (st.status === 'SUCCEEDED' && st.contentUrl) { contentUrl = st.contentUrl; break; }
+    }
+    if (!contentUrl) throw new Error('StarCreate 任务超时（60 分钟）');
+    onProgress?.(95);
+
+    /* 成片下载：完整 https 直链无需 Key；仅 /api/ 开头相对路径才拼域名并带 Key */
+    const isFull = /^https?:\/\//i.test(contentUrl);
+    const dl = isFull ? contentUrl : 'https://starcreateai.com' + contentUrl;
+    let blob = null;
+    for (let a = 0; a < 3 && !blob; a++) {
+      try {
+        const ctl = new AbortController();
+        const tm = setTimeout(() => ctl.abort(), 300000);
+        const resp = await fetch(dl, { signal: ctl.signal, headers: isFull ? headers : undefined });
+        blob = resp.ok ? await resp.blob() : null;
+        clearTimeout(tm);
+      } catch (e) { blob = null; }
+    }
+    if (!blob) throw new Error('StarCreate 成片下载失败：' + dl);
+    const dataURL = await blobToDataURL(blob);
+    let frame = '';
+    try { frame = await videoFirstFrame(dataURL); } catch (e) { /* 首帧失败不阻塞 */ }
+    onProgress?.(100);
+    return {
+      kind: 'video', dataURL, blob,
+      frames: frame ? [frame] : [],
+      duration: 30,
+      meta: {
+        prompt: params.prompt, model: cfg.modelId, provider: 'starcreate', mode: 'SD 2.5 · ' + (imgUrls.length ? '参考生' : '文生'),
+        aspect, resolution: '720p', videoURL: contentUrl,
+        billed: (cj && cj.priceBeans != null) ? cj.priceBeans + ' 欢乐豆' : '', time: U.formatTime(),
+      },
+    };
+  }
+
+  /* =====================================================
    * 本地工具任务（非 AI 生成：纯画布裁剪 / 视频拼接合成）
    * ===================================================== */
 
@@ -1229,7 +1561,7 @@
   const TASK_KIND = {
     genImage: 'image', genGrid: 'image', genTriView: 'image', genHandRef: 'image',
     genExpand: 'image', genInpaint: 'image',
-    genVideo: 'video',
+    genVideo: 'video', upscaleVideo: 'video',
     scriptToShots: 'text', reverseImage: 'text', compliance: 'text',
     tts: 'tts',
   };
@@ -1264,9 +1596,14 @@
          注意：url 指向 api.lk888.ai 时必须命中这里，不能落到下方 OpenAI /images 或火山方舟 /contents 的脆弱协议。 */
       const isLk = /lk888\.ai/i.test(cfg.url || '');
       const isAnmiao = /api\/v3\/anmiao/i.test(cfg.url || '') || /doubao-seedance-2-0/i.test(String(cfg.modelId || ''));
-      if (isAnmiao && kind === 'video') result = await anmiaoVideo(cfg, params, wrappedProgress);
+      const isH3tk = /hailuo.*h3.*cankaosheng|h3特价/i.test(String(cfg.modelId || '') + (cfg.name || ''));
+      if (task === 'upscaleVideo') result = await upscaleVideo(cfg, params, wrappedProgress);
+      else if (isAnmiao && kind === 'video') result = await anmiaoVideo(cfg, params, wrappedProgress);
+      else if (isLk && kind === 'video' && isH3tk) result = await h3tkVideo(cfg, params, wrappedProgress);
       else if (isLk && kind === 'image') result = await lk888MediaImage(cfg, task, params, wrappedProgress);
       else if (isLk && kind === 'video') result = await lk888MediaVideo(cfg, params, wrappedProgress);
+      /* StarCreate AI（starcreateai.com）：独立模块，按次计费（SEEDANCE_SD_2_5 等） */
+      else if (/starcreateai/i.test(cfg.url || '')) result = await starVideo(cfg, params, wrappedProgress, taskId);
       /* OpenAI 兼容生图（agicto 等非 lk888 中转站） */
       else if (cfg.provider === 'openai' && kind === 'image') result = await openaiImage(cfg, task, params, wrappedProgress);
       /* OpenAI 兼容视频：lk888 已被上面 isLk 分支接管；非 lk888 无标准 OpenAI 视频端点，明确报错避免误连 */
@@ -1401,6 +1738,78 @@
       }
       onProgress?.(100);
       return { kind: 'image', dataURL, meta: { model: ext.modelId, provider: 'lk888', extTaskId: ext.extTaskId, time: U.formatTime() } };
+    }
+    if (ext.proto === 'h3tk' || ext.proto === 'upscale') {
+      /* 22Ai 海螺 H3 参考生 / 视频超清：GET {base 规范化到 /v1}/media/status?task_id=；state/is_final/result_url 顶层字段 */
+      const rawB = (ext.base || '').replace(/\/+$/, '');
+      const h3base = /\/v1$/.test(rawB) ? rawB : rawB + '/v1';
+      let resultURL = '';
+      for (let i = 0; i < 720; i++) {
+        await U.sleep(5000);
+        let st = null;
+        try {
+          const res = await fetch(h3base + '/media/status?task_id=' + encodeURIComponent(ext.extTaskId), { headers });
+          if (res.ok) st = await res.json();
+        } catch (e) { /* 网络抖动：继续轮询 */ }
+        if (!st) continue;
+        const pct = Number(String(st.progress || '').replace('%', '')) || 0;
+        onProgress?.(pct ? Math.min(90, 8 + pct * 0.85) : Math.min(90, 8 + i * 0.15));
+        if (st.state === 'failed' || st.error) {
+          throw new Error('视频任务失败：' + (st.error || st.state || '未知原因（费用已自动退款）'));
+        }
+        if (st.is_final === true && st.state === 'success') {
+          resultURL = st.result_url || '';
+          if (resultURL) break;
+        }
+      }
+      if (!resultURL) throw new Error('视频任务续轮询超时（60 分钟）');
+      onProgress?.(93);
+      const blob = await (await fetch(resultURL)).blob();
+      const dataURL = await blobToDataURL(blob);
+      let frame = '';
+      try { frame = await videoFirstFrame(dataURL); } catch (e) { /* 首帧失败不阻塞 */ }
+      onProgress?.(100);
+      return {
+        kind: 'video', dataURL, blob, frames: frame ? [frame] : [],
+        duration: Number(ext.duration) || 5,
+        meta: { model: ext.modelId, provider: 'lk888', extTaskId: ext.extTaskId, videoURL: resultURL, time: U.formatTime(), mode: ext.proto === 'upscale' ? '视频超清' : '参考生' },
+      };
+    }
+    if (ext.proto === 'star') {
+      /* StarCreate AI：GET {base}/{extTaskId} 续轮询（12s 间隔，与创建时一致），成功拿 contentUrl */
+      let contentUrl = '';
+      for (let i = 0; i < 300; i++) {
+        await U.sleep(12000);
+        let st = null;
+        try {
+          const res = await fetch(base + '/' + encodeURIComponent(ext.extTaskId), { headers });
+          if (res.ok) st = await res.json();
+          else if (res.status === 429) { await U.sleep(8000); }
+        } catch (e) { /* 网络抖动：继续轮询 */ }
+        if (!st) continue;
+        onProgress?.(Math.min(92, 10 + Number(st.progress || 0) * 0.82));
+        if (st.status === 'FAILED' || st.status === 'CANCELLED') {
+          throw new Error('StarCreate 任务失败：' + (st.errorMessage || st.errorCode || st.status || '未知原因（豆已自动退回）'));
+        }
+        if (st.status === 'SUCCEEDED' && st.contentUrl) { contentUrl = st.contentUrl; break; }
+      }
+      if (!contentUrl) throw new Error('StarCreate 任务续轮询超时（60 分钟）');
+      onProgress?.(95);
+      const sFull = /^https?:\/\//i.test(contentUrl);
+      const sDl = sFull ? contentUrl : 'https://starcreateai.com' + contentUrl;
+      const sBlob = await (await fetch(sDl, { headers: sFull ? headers : undefined })).blob();
+      const sData = await blobToDataURL(sBlob);
+      let sFrame = '';
+      try { sFrame = await videoFirstFrame(sData); } catch (e) { /* 首帧失败不阻塞 */ }
+      onProgress?.(100);
+      return {
+        kind: 'video', dataURL: sData, blob: sBlob, frames: sFrame ? [sFrame] : [],
+        duration: Number(ext.duration) || 30,
+        meta: {
+          model: ext.modelId, provider: 'starcreate', extTaskId: ext.extTaskId, videoURL: contentUrl,
+          aspect: ext.ratio, resolution: ext.resolution || '720p', time: U.formatTime(),
+        },
+      };
     }
     throw new Error('未知的第三方任务协议：' + ext.proto);
   };

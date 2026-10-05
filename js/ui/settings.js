@@ -29,6 +29,11 @@
       { name: 'seedance 2.0 fast', provider: 'ark', modelId: 'doubao-seedance-2-0-fast-260128', url: 'https://api.lk888.ai/api/v3/anmiao', key: 'sk-15eb8f58fccbbe00c464c2487e712b7a6a263cf48fa7aa02', resolutions: ['480P', '720P'] },
       { name: 'seedance 2.0 mini', provider: 'ark', modelId: 'doubao-seedance-2-0-mini-260615', url: 'https://api.lk888.ai/api/v3/anmiao', key: 'sk-90885a6da70a05728c0f733b416aa8394c2040064f32520b', resolutions: ['480P', '720P'] },
       { name: 'seedance-2.5', provider: 'ark', modelId: 'seedance-2.5-guanfang', url: 'https://api.lk888.ai/v1', key: 'sk-be09115bdbcf6251e3baa8d2c9128c9317b3eb7e0f9cf654', resolutions: ['480P', '720P', '1080P'] },
+      /* 本地新增模型（2026-10）：h3特价参考生 / 22Ai 视频超分 / StarCreate 特价版 */
+      { name: 'h3特价', provider: 'openai', modelId: 'hailuo-h3-cankaosheng', url: 'https://api.lk888.ai/v1', key: 'sk-f6bd693d29ed4a1412d729ca35cbedf7f14eafaa88acd5d7', resolutions: ['768P', '1080P', '2K', '4K'] },
+      { name: '视频超分', provider: 'openai', modelId: 'video-enhance', url: 'https://api.lk888.ai/v1', key: 'sk-07f92245c54454682c5229af22687bacc228a39cc6237f70' },
+      /* StarCreate AI 特价版（按次计费 35 豆/次）：时长锁 30s、分辨率锁 720p、画幅 6 选 1、参考图≤9 */
+      { name: 'sd 2.5', provider: 'openai', modelId: 'SEEDANCE_SD_2_5', url: 'https://starcreateai.com/api/open/v1', key: 'sk-Op3UeKXxCX0TdQTmGkrTCTsJZAny4qtxiI59jQC5nYcxtGvK', resolutions: ['720P'] },
     ],
   };
 
@@ -125,6 +130,11 @@
 
     modelNames(kind) {
       return (this.listOf(kind) || []).map((m) => m.name);
+    },
+
+    /* 超分专用模型识别（仅「视频超清」节点使用）：普通视频节点的模型下拉排除此类模型 */
+    isUpscaleModel(name) {
+      return /zaishengcheng|upscale|超清|超分|升2k|超分辨率|video-enhance/i.test(String(name || ''));
     },
 
     listOf(kind) {

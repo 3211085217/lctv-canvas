@@ -21,14 +21,16 @@
   const VIDEO_RESOLUTIONS = [['720P', '720P'], ['1080P', '1080P'], ['2K', '2K']];
   const VIDEO_MODES = [['shouweizhen', '首尾帧'], ['cankaosheng', '参考生']];
 
-  /* 分栏式节点：与图片/视频一致的“上方显示框 + 下方浮动提示词面板”结构（专属参数控件全部移除，显示框固定 16:9） */
-  const PANE_TYPES = ['text', 'audio', 'script', 'subtitle'];
+  /* 分栏式节点：与图片/视频一致的“上方显示框 + 下方浮动提示词面板”结构（专属参数控件全部移除，显示框固定 16:9）
+   * upscale（视频超清）同属此结构：显示框放输入/输出视频，底部面板只放模型选择（无提示词输入框） */
+  const PANE_TYPES = ['text', 'audio', 'script', 'subtitle', 'upscale'];
 
   /* 按当前选的视频模型查支持的分辨率档位；未声明则回退 VIDEO_RESOLUTIONS
    * 不同模型支持的档位不同（H3：768P/1080P/2K/4K；Vidu Q3：540P/720P/1080P；Seedance：480P/720P/1080P） */
   function videoResolutions(modelName) {
     if (!modelName) return VIDEO_RESOLUTIONS;
     // 硬编码已知模型（与 settings.js 预置同步，防止 localStorage 同步异常时仍能正确显示）
+    if (/^sd\s*2\.5/i.test(modelName)) return [['720P', '720P']];   // StarCreate 特价版：仅 720p
     if (/viduq3/i.test(modelName)) return [['540P', '540P'], ['720P', '720P'], ['1080P', '1080P']];
     if (/minimax.*h3|^h3|H3$/i.test(modelName)) return [['768P', '768P'], ['1080P', '1080P'], ['2K', '2K'], ['4K', '4K']];
     if (/seedance.*2\.5|seedance-2-5/i.test(modelName)) return [['480P', '480P'], ['720P', '720P'], ['1080P', '1080P']];
@@ -48,7 +50,9 @@
    * Vidu Q3：仅参考图 1-7；H3：图 9/视频 3/音频 3；Seedance：图 30/视频 10/音频 10 */
   function videoRefCaps(modelName) {
     if (!modelName) return { img: 9, vid: 3, aud: 3 };     // 兜底（H3 规格）
+    if (/^sd\s*2\.5/i.test(modelName)) return { img: 9, vid: 0, aud: 0 };   // StarCreate 特价版：仅参考图 ≤9
     if (/viduq3/i.test(modelName)) return { img: 7, vid: 0, aud: 0 };
+    if (/hailuo.*h3|h3特价/i.test(modelName)) return { img: 9, vid: 0, aud: 0 };   // 海螺 H3 参考生：仅参考图，无视频/音频参考
     if (/minimax.*h3|^h3|H3$/i.test(modelName)) return { img: 9, vid: 3, aud: 3 };
     if (/seedance.*2\.5|seedance-2-5/i.test(modelName)) return { img: 30, vid: 10, aud: 10 };
     if (/seedance/i.test(modelName)) return { img: 9, vid: 3, aud: 3 };
@@ -57,6 +61,7 @@
 
   /* 按当前视频模型查视频时长范围：Seedance 2.5 支持 4~30 秒，其余 4~15 秒 */
   function videoDurations(modelName) {
+    if (/^sd\s*2\.5/i.test(modelName || '')) return [[30, '30s']];   // StarCreate 特价版：时长锁死 30 秒
     const max = /seedance.*2\.5|seedance-2-5/i.test(modelName || '') ? 30 : 15;
     const arr = [];
     for (let s = 4; s <= max; s++) arr.push([s, s + 's']);
@@ -484,6 +489,15 @@
           if (o && o.dataURL) return `<div class="n-preview"><video src="${o.dataURL}" controls style="width:100%"></video></div><div class="n-desc">${U.esc(info)}</div>`;
           return `<div class="n-preview" style="min-height:76px"><div class="ph">${U.icon('export', 20)} ${U.esc(info)}</div></div>`;
         }
+        case 'upscale': {
+          if (o && o.dataURL && o.kind === 'video') {
+            const poster = (o.frames && o.frames[0]) || '';
+            const zoomBtn = '<button class="n-zoom" data-zoom="video" title="放大查看">⛶</button>';
+            return `<div class="n-preview"><video src="${o.dataURL}" class="n-video" controls preload="none" playsinline${poster ? ` poster="${poster}"` : ''}></video>${zoomBtn}</div>
+              <div class="n-desc">${U.esc(o.meta?.mode || '视频超清')}${o.meta?.resolution ? ' · ' + U.esc(o.meta.resolution.toUpperCase()) : ''}${o.meta?.fps && o.meta.fps !== 'keep' ? ' · ' + U.esc(o.meta.fps) + 'fps' : ''} · ${U.esc(o.meta?.model || '')}</div>`;
+          }
+          return `<div class="n-preview"><div class="ph">${U.icon('upscale', 20)} 连接视频节点 → 超清增强<div class="ph-txt">只接受视频输入</div></div></div>`;
+        }
         default: return `<div class="n-preview"><div class="ph">${U.icon(t.icon, 22)}</div></div>`;
       }
     }
@@ -504,7 +518,9 @@
       const durSlider = (cur, min, max) => `<div class="nc-dur"><input class="n-field nc-dur-range" type="range" min="${min}" max="${max}" step="1" data-prop="duration" data-num value="${cur}"><span class="nc-dur-val">${cur}s</span></div>`;
       /* 模型下拉（来自设置；空则引导去添加） */
       const modelSel = (prop, kind, cur, tip) => {
-        const names = LC.Settings.modelNames(kind);
+        let names = LC.Settings.modelNames(kind);
+        // 视频节点：排除超分专用模型（只在「视频超清」节点可选）
+        if (kind === 'video' && LC.Settings.isUpscaleModel) names = names.filter((m) => !LC.Settings.isUpscaleModel(m));
         if (!names.length) return `<button class="nc-nomodel" data-open-settings>${tip} · 去设置添加</button>`;
         return sel(prop, names, names.includes(cur) ? cur : names[0]);
       };
@@ -543,6 +559,13 @@
 
         case 'video': {
           const vMode = (p.mode === 'shouweizhen' || p.mode === 'i2v') ? 'shouweizhen' : 'cankaosheng';
+          /* StarCreate 特价版（sd 2.5）：时长/分辨率锁死、画幅 6 选 1、仅参考生（按次计费模型，参数不可自由组合） */
+          const isStar = /^sd\s*2\.5/i.test(p.model || '');
+          const STAR_ASPECTS = [['9:16', '9:16'], ['3:4', '3:4'], ['4:3', '4:3'], ['16:9', '16:9'], ['21:9', '21:9'], ['1:1', '1:1']];
+          if (isStar) {
+            if (p.mode !== 'cankaosheng') { p.mode = 'cankaosheng'; LC.App.saveSoon(); }
+            if (!STAR_ASPECTS.some(([v]) => v === p.aspect)) { n.props.aspect = '9:16'; LC.App.saveSoon(); }
+          }
           // 按当前模型查支持的分辨率档位；当前 p.resolution 不在支持列表则自动校正到第一档
           const vRes = videoResolutions(p.model);
           let curRes = vRes.length ? vRes[0][0] : '768P';
@@ -562,12 +585,13 @@
           const durMax = vDurs.length ? vDurs[vDurs.length - 1][0] : 15;
           let curDur = Number(p.duration) || 5;
           if (curDur < durMin || curDur > durMax) { curDur = Math.min(durMax, Math.max(durMin, curDur)); n.props.duration = curDur; LC.App.saveSoon(); }
+          const fixedChip = (txt) => `<span class="nc-dur"><span class="nc-dur-val">${txt}（固定）</span></span>`;
           return `
-            <div class="nc-row nc-chips">${chips(VIDEO_MODES, () => vMode, 'mode')}</div>
-            ${vMode === 'shouweizhen' ? `<div class="nc-row nc-dual"><button class="nc-btn" data-upframe>⬆ 首帧</button><button class="nc-btn" data-uplast>⬆ 尾帧</button></div>` : ''}
-            ${vMode === 'cankaosheng' ? `<div class="nc-row">${refBtns.join('')}</div>` : ''}
-            <div class="nc-row nc-model-row">${modelSel('model', 'video', p.model, '暂无视频模型')}${sel('aspect', VIDEO_ASPECTS, p.aspect || 'adaptive')}</div>
-            <div class="nc-row nc-dual">${durSlider(curDur, durMin, durMax)}${sel('resolution', vRes, curRes)}</div>`;
+            ${isStar ? '' : `<div class="nc-row nc-chips">${chips(VIDEO_MODES, () => vMode, 'mode')}</div>`}
+            ${(!isStar && vMode === 'shouweizhen') ? `<div class="nc-row nc-dual"><button class="nc-btn" data-upframe>⬆ 首帧</button><button class="nc-btn" data-uplast>⬆ 尾帧</button></div>` : ''}
+            ${(!isStar && vMode === 'cankaosheng') ? `<div class="nc-row">${refBtns.join('')}</div>` : (isStar ? `<div class="nc-row">${refBtns.join('')}</div>` : '')}
+            <div class="nc-row nc-model-row">${modelSel('model', 'video', p.model, '暂无视频模型')}${sel('aspect', isStar ? STAR_ASPECTS : VIDEO_ASPECTS, isStar ? (p.aspect || '9:16') : (p.aspect || 'adaptive'))}</div>
+            <div class="nc-row nc-dual">${isStar ? fixedChip('30s') + fixedChip('720P') : `${durSlider(curDur, durMin, durMax)}${sel('resolution', vRes, curRes)}`}</div>`;
         }
 
         case 'stage':
@@ -1147,6 +1171,8 @@
       run.classList.remove('busy');
       const oldOv = pre && U.$('.n-progress', pre);
       if (oldOv) oldOv.remove();
+      const oldTrack = pre && U.$('.n-progress-track', pre);
+      if (oldTrack) oldTrack.remove();
       switch (n.state.status) {
         case 'running': {
           el.classList.add('running'); run.classList.add('busy');
@@ -1157,6 +1183,13 @@
             ov.className = 'n-progress';
             ov.textContent = pct + '%';
             pre.appendChild(ov);
+            // 视频超清：另加一条横向进度条（executor.setProg 实时更新 .n-progress-fill 宽度）
+            if (n.type === 'upscale') {
+              const track = document.createElement('div');
+              track.className = 'n-progress-track';
+              track.innerHTML = '<i class="n-progress-fill"></i>';
+              pre.appendChild(track);
+            }
           }
           break;
         }

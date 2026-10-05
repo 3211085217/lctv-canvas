@@ -106,7 +106,7 @@
       const n = g.getNode(id);
       if (!n || this.running.has(id)) return;
       // 积分扣费（云端充值系统）：后端按 kind 定价；余额不足 → 弹充值窗并中止本次生成
-      const creditKind = { image: 'image', video: 'video', audio: 'audio' }[n.type];
+      const creditKind = { image: 'image', video: 'video', audio: 'audio', upscale: 'video' }[n.type];
       if (creditKind && LC.Credit) {
         const allowed = await LC.Credit.consume(creditKind);
         if (!allowed) return;
@@ -135,6 +135,7 @@
           if (el) {
             const st = U.$('.n-status', el); if (st) st.textContent = Math.round(val) + '%';
             const ov = U.$('.n-progress', el); if (ov) ov.textContent = Math.round(val) + '%';
+            const fill = U.$('.n-progress-fill', el); if (fill) fill.style.width = Math.round(val) + '%';   // 超清节点横向进度条
           }
           // 将“界面显示的动画进度”节流同步到后端（所见即所得）：
           // 后端 AI.run 同步的是 API 真实进度（通常偏低），刷新后恢复用低值会“从最开始开始”；
@@ -405,7 +406,8 @@
           const prompt = [p.prompt, ...inp.text].filter(Boolean).join('\n');
           if (!prompt) throw new Error('请先输入视频提示词（描述动作/运镜）再生成');
           // 视频两模式：首尾帧 / 参考生（默认参考生=图生；连线连上资产自动带参考）
-          const mode = (p.mode === 'shouweizhen' || p.mode === 'i2v') ? 'shouweizhen' : 'cankaosheng';
+          const isStar = /^sd\s*2\.5/i.test(p.model || '');   // StarCreate 特价版：仅参考生，参数锁死
+          const mode = isStar ? 'cankaosheng' : ((p.mode === 'shouweizhen' || p.mode === 'i2v') ? 'shouweizhen' : 'cankaosheng');
           const upVids = (inp.videos || []).map((v) => v && (v._dataURL || v.dataURL)).filter(Boolean);
           const upAuds = (inp.audio || []).map((a) => a && (a._dataURL || a.dataURL || a.data)).filter(Boolean);
           // 首尾帧：只用本地手动上传的首帧/尾帧，不掺入上游连线图片（首尾帧语义固定为首帧+尾帧）
@@ -421,9 +423,9 @@
           // 参考生：本地槽位 + 上游图/视频/音频合并（slotData 与 collect 已过滤 null）
           const isVidu = /viduq3/i.test(p.model || '');
           const isSeed = /seedance/i.test(p.model || '');
-          const capImg = isVidu ? 7 : (isSeed ? 30 : 9);
-          const capVid = isSeed ? 10 : (isVidu ? 0 : 3);
-          const capAud = isSeed ? 10 : (isVidu ? 0 : 3);
+          const capImg = isStar ? 9 : (isVidu ? 7 : (isSeed ? 30 : 9));   // StarCreate 特价版：仅参考图 ≤9
+          const capVid = isStar ? 0 : (isSeed ? 10 : (isVidu ? 0 : 3));
+          const capAud = isStar ? 0 : (isSeed ? 10 : (isVidu ? 0 : 3));
           const refImgs = [...(await slotData(p.refImages)), ...(inp.images || [])].filter(Boolean).slice(0, capImg);
           const _fp = (s) => (typeof s === 'string' ? (s.slice(0, 14) + '…' + s.slice(-8) + '[' + s.length + ']') : '?');
           console.log('[视频参考图诊断] mode=%s 本地槽=%d 上游连线=%d 合计=%d → %s',
@@ -432,12 +434,15 @@
           const refVids = [...(await slotData(p.refVideos)), ...upVids].filter(Boolean).slice(0, capVid);
           const refAuds = [...(await slotData(p.refAudios)), ...upAuds].filter(Boolean).slice(0, capAud);
           const opts = {
-            model: p.model, duration: p.duration, aspect: p.aspect, resolution: p.resolution,
+            model: p.model,
+            duration: isStar ? 30 : p.duration,   // StarCreate 特价版：时长锁死 30s
+            aspect: isStar ? (['9:16', '3:4', '4:3', '16:9', '21:9', '1:1'].includes(p.aspect) ? p.aspect : '9:16') : p.aspect,
+            resolution: isStar ? '720p' : p.resolution,   // StarCreate 特价版：分辨率锁死 720p
             mode, style: p.style, light: p.light,
             images: mode === 'shouweizhen' ? swImgs : [],
             refImages: mode === 'cankaosheng' ? refImgs : [],
-            refVideos: mode === 'cankaosheng' ? refVids : [],
-            refAudios: mode === 'cankaosheng' ? refAuds : [],
+            refVideos: (mode === 'cankaosheng' && !isStar) ? refVids : [],
+            refAudios: (mode === 'cankaosheng' && !isStar) ? refAuds : [],
           };
           return AI.run('genVideo', { prompt, ...opts }, progress, taskId);
         }
@@ -484,6 +489,32 @@
             inp.any.map((o) => (o.meta?.prompt || '')).filter(Boolean).join(' ') || '';
           if (!text) throw new Error('没有可校验的内容输入');
           return AI.run('compliance', { prompt: text, rules: p.rules, model: p.model }, progress, taskId);
+        }
+        case 'upscale': {
+          // 只取上游视频（连线层已限制视频源）；@引用不参与
+          const vid = inp.videos[0];
+          if (!vid) throw new Error('未接入视频：请连接一个已生成完成的视频节点再执行');
+          // 22Ai 超分输入约束预检（接入文档）：时长 ≤ 10 分钟；素材上传链路上限 100MB
+          const upDur = Math.round(Number(vid.duration) || 0);
+          if (upDur > 600) throw new Error(`输入视频时长约 ${Math.round(upDur / 60)} 分钟，超过超分上限 10 分钟，请先换更短的视频`);
+          const upSrc = vid._dataURL || vid.dataURL;
+          if (typeof upSrc === 'string' && upSrc.startsWith('data:')) {
+            const upMB = Math.round(upSrc.length * 0.75 / 1048576);   // base64 长度 × 0.75 ≈ 原始字节
+            if (upMB > 100) throw new Error(`输入视频约 ${upMB}MB，超过素材上传上限 100MB，请换更短的视频`);
+            if (upMB > 80) LC.App.toast(`输入视频约 ${upMB}MB，接近上传上限，若上传失败请换更短的视频`, 'warn');
+          }
+          if (!p.model) {
+            // 面板下拉展示的是第一个可用超清模型，未手动选择时自动选中它（所见即所得，避免"显示了但没选上"）
+            const ups = (LC.Settings.modelNames('video') || []).filter((m) => LC.Settings.isUpscaleModel(m));
+            if (ups.length) p.model = ups[0];
+            else throw new Error('没有可用的超清模型：请在「设置 → 视频模型」添加带「超清/超分/video-enhance」字样的模型后再执行');
+          }
+          return AI.run('upscaleVideo', {
+            model: p.model, video: vid._dataURL || vid.dataURL, duration: vid.duration,
+            resolution: p.resolution || '1080p', fps: p.fps || 'keep',
+            toolVersion: p.toolVersion || 'standard', scene: p.scene || 'aigc',
+            enhanceStyle: p.enhanceStyle || 'natural',
+          }, progress, taskId);
         }
         case 'export': {
           // 优先用真实视频源（Ark 生成/本地上传），无源退化为首帧图动效

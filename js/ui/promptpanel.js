@@ -8,13 +8,16 @@
   const GAP = 10;        // 节点底边与面板顶边的空隙（屏幕 px，固定不随缩放）
   const PANEL_W = 560;   // 面板固定屏幕宽度（不随画布缩放变化，保证控件永远横排可读）
 
-  /* 分栏式节点（文本/音频/脚本/字幕）：面板配置
-   * promptProp：提示词绑定的 props 字段；modelKind：模型列表类别；modelProp：模型保存字段 */
+  /* 分栏式节点（文本/音频/脚本/字幕/视频超清）：面板配置
+   * promptProp：提示词绑定的 props 字段；modelKind：模型列表类别；modelProp：模型保存字段
+   * noInput：无提示词输入框（视频超清：只有模型选择 + 运行按钮）
+   * upscaleOnly：模型下拉只列带超清标识的模型（普通视频模型不出现） */
   const PANE_TYPES = {
     text:     { promptProp: 'text',     modelKind: 'text', modelProp: 'model', placeholder: '文本内容 / 提示词 / 备注…' },
     audio:    { promptProp: 'text',     modelKind: 'tts',  modelProp: 'voice', placeholder: '台词 / 音频描述…' },
     script:   { promptProp: 'content',  modelKind: 'text', modelProp: 'model', placeholder: '粘贴故事梗概或完整剧本…' },
     subtitle: { promptProp: 'text',     modelKind: 'text', modelProp: 'model', placeholder: '字幕文本…' },
+    upscale:  { promptProp: '',         modelKind: 'video', modelProp: 'model', noInput: true, upscaleOnly: true },
   };
 
   const Panel = {
@@ -131,6 +134,8 @@
       if (pane) return this.renderPane(n, pane);
       const p = n.props;
       const isImg = n.type === 'image';
+      /* StarCreate 特价版（sd 2.5）：时长 30s / 分辨率 720p 锁死、画幅 6 选 1、仅参考生 */
+      const isStar = !isImg && /^sd\s*2\.5/i.test(p.model || '');
 
       // ---------- 图片模型「档位」下拉：按模型能力动态（不写死） ----------
       // tt-image-2 → 画质 高/中/低；tt-image-2.5 / 官转、纳米香蕉 Pro → 分辨率 1K/2K/4K；其他 → null（走画质+分辨率组合）
@@ -160,8 +165,9 @@
         return `<span class="pp-model">${icon}<button class="pp-drop" data-ppdrop="${modelProp}">${U.esc(cur)}<span class="pp-caret">▾</span></button></span>`;
       };
 
-      // 画幅：自定义下拉按钮（视频含"自适应"）
-      const aspLabel = (!isImg && (!p.aspect || p.aspect === 'adaptive')) ? '自适应' : (p.aspect || '1:1');
+      // 画幅：自定义下拉按钮（视频含"自适应"；sd 2.5 无自适应，6 选 1）
+      const aspLabel = isStar ? ((p.aspect && p.aspect !== 'adaptive') ? p.aspect : '9:16')
+        : ((!isImg && (!p.aspect || p.aspect === 'adaptive')) ? '自适应' : (p.aspect || '1:1'));
       const aspectSel = `<button class="pp-drop pp-drop-sm" data-ppdrop="aspect" title="选择画幅比例">${aspLabel}<span class="pp-caret">▾</span></button>`;
 
       // 画质：tt 模型按动态档位手动选；其他图片模型用「画质+分辨率」组合；视频用滑块选秒
@@ -170,13 +176,15 @@
           ? (ttLabel || '自适应')
           : (Number(p.quality) ? '高清' : '标准') + '画质 ' + (p.resolution || '2K'))
         : (p.duration || 5) + 's';
-      // 视频时长：迷你 range 滑块（替代下拉）；图片仍用下拉
+      // 视频时长：迷你 range 滑块（替代下拉）；sd 2.5 锁死 30s 显示固定文本；图片仍用下拉
       const vModel = p.model || '';
       const durMax = /seedance.*2\.5|seedance-2-5/i.test(vModel) ? 30 : 15;
-      const durCur = Number(p.duration) || 5;
+      const durCur = isStar ? 30 : (Number(p.duration) || 5);
       const qualitySel = isImg
         ? `<button class="pp-drop pp-drop-sm" data-ppdrop="${ttCfg ? 'ttTier' : 'qualityRes'}">${qualityLabel}<span class="pp-caret">▾</span></button>`
-        : `<span class="pp-dur-slider" title="拖动选时长"><input type="range" class="pp-dur-range" min="4" max="${durMax}" step="1" value="${durCur}"><span class="pp-dur-val">${durCur}s</span></span>`;
+        : isStar
+          ? `<span class="pp-dur-slider" title="sd 2.5 时长固定 30 秒"><span class="pp-dur-val">30s（固定）</span></span>`
+          : `<span class="pp-dur-slider" title="拖动选时长"><input type="range" class="pp-dur-range" min="4" max="${durMax}" step="1" value="${durCur}"><span class="pp-dur-val">${durCur}s</span></span>`;
 
       // 模式 chips（图片）
       const modeChips = isImg ? (() => {
@@ -184,6 +192,8 @@
         return modes.map(([v, lb]) =>
           `<span class="pp-chip${p.mode === v ? ' on' : ''}" data-ppchip="mode=${v}">${lb}</span>`).join('');
       })() : (() => {
+        // sd 2.5：仅参考生（锁死，不给切换）
+        if (isStar) return `<span class="pp-chip on">参考生</span>`;
         // H3 三模式（旧 i2v 归一为首尾帧）
         const cur = (p.mode === 'shouweizhen' || p.mode === 'i2v') ? 'shouweizhen' : 'cankaosheng';
         const modes = [['shouweizhen', '首尾帧'], ['cankaosheng', '参考生']];
@@ -232,6 +242,7 @@
               ${qualitySel}
               <span class="pp-mid">·</span>
               ${isImg ? `<button class="pp-drop pp-drop-sm" data-ppdrop="count">${p.count || 1}张<span class="pp-caret">▾</span></button>`
+                : isStar ? `<span class="pp-drop pp-drop-sm" title="sd 2.5 分辨率固定 720p">720P（固定）</span>`
                 : `<button class="pp-drop pp-drop-sm" data-ppdrop="resolution" title="输出分辨率">${p.resolution || '720P'}<span class="pp-caret">▾</span></button>`}
             </div>
             <div class="pp-bar-right">
@@ -244,19 +255,53 @@
       this.updateRunBtn();
     },
 
-    /* ---------- 分栏式节点（文本/音频/脚本/字幕）：简版面板 — 提示词输入 + 模型选择 + 生成 ---------- */
+    /* ---------- 分栏式节点（文本/音频/脚本/字幕/视频超清）：简版面板 — 提示词输入 + 模型选择 + 生成 ---------- */
     renderPane(n, cfg) {
       this.closeStylePicker();
       this.closeDropPicker();
       const p = n.props;
       // 模型选择：自定义下拉按钮（显示完整名称）；空列表则引导去设置添加
+      // 超清节点：只列「设置 → 视频模型」中带超清标识的模型
       const modelOpts = () => {
-        const names = LC.Settings.modelNames(cfg.modelKind);
-        if (!names.length) return `<button class="pp-nomodel" data-open-settings>暂无${cfg.modelKind === 'tts' ? '音色' : '语言模型'} · 去设置添加</button>`;
+        let names = LC.Settings.modelNames(cfg.modelKind);
+        if (cfg.upscaleOnly) names = names.filter((m) => LC.Settings.isUpscaleModel(m));
+        if (!names.length) {
+          const label = cfg.upscaleOnly ? '超清模型' : (cfg.modelKind === 'tts' ? '音色' : '语言模型');
+          return `<button class="pp-nomodel" data-open-settings>暂无${label} · 去设置添加</button>`;
+        }
         const cur = p[cfg.modelProp];
-        const icon = U.icon(cfg.modelKind === 'tts' ? 'audio' : 'text', 14);
+        const icon = U.icon(cfg.modelKind === 'tts' ? 'audio' : (n.type === 'upscale' ? 'upscale' : 'text'), 14);
         return `<span class="pp-model">${icon}<button class="pp-drop" data-ppdrop="${cfg.modelProp}">${U.esc(cur || names[0])}<span class="pp-caret">▾</span></button></span>`;
       };
+      // 视频超清：无提示词输入框，面板保留选择功能（超分参数下拉 + 模型下拉）+ 运行按钮
+      if (cfg.noInput) {
+        const upDrop = (prop, title, opts, def) => {
+          const cur = p[prop] || def;
+          const lb = (opts.find(([v]) => v === cur) || opts[0])[1];
+          return `<button class="pp-drop pp-drop-sm" data-ppdrop="${prop}" title="${title}">${lb}<span class="pp-caret">▾</span></button>`;
+        };
+        this.el.innerHTML = `
+          <div class="pp-inner">
+            <div class="pp-node-title" title="当前面板绑定的节点（下方 ▶ 只生成这个节点）">${U.icon('target', 12)} ${U.esc(n.title)}</div>
+            <div class="pp-modes">
+              ${upDrop('resolution', '目标清晰度（越高越清晰，单价越高）', [['720p', '720P'], ['1080p', '1080P'], ['2k', '2K'], ['4k', '4K'], ['8k', '8K']], '1080p')}
+              ${upDrop('fps', '输出帧率（60 / 120 为智能插帧）', [['keep', '保持帧率'], ['60', '60fps'], ['120', '120fps']], 'keep')}
+              ${upDrop('toolVersion', '处理版本（专业版效果优先，10 倍价）', [['standard', '标准版'], ['professional', '专业版']], 'standard')}
+              ${upDrop('scene', '视频类型（仅标准版生效）', [['aigc', 'AI视频'], ['short_series', '短剧'], ['ugc', '短视频'], ['old_film', '老片修复']], 'aigc')}
+              ${upDrop('enhanceStyle', '增强风格', [['natural', '自然'], ['hd', '锐利']], 'natural')}
+            </div>
+            <div class="pp-bar">
+              <div class="pp-bar-left">
+                ${modelOpts()}
+              </div>
+              <div class="pp-bar-right">
+                <button class="pp-run" data-ppact="run" title="生成">${U.icon('arrow-up', 15)}</button>
+              </div>
+            </div>
+          </div>`;
+        this.updateRunBtn();
+        return;
+      }
       this.el.innerHTML = `
         <div class="pp-inner">
           <div class="pp-node-title" title="当前面板绑定的节点（下方 ▶ 只生成这个节点）">${U.icon('target', 12)} ${U.esc(n.title)}</div>
@@ -338,7 +383,11 @@
           ['adaptive', '自适应'], ['16:9', '16:9'], ['9:16', '9:16'], ['1:1', '1:1'],
           ['4:3', '4:3'], ['3:4', '3:4'], ['21:9', '21:9'],
         ];
-        items = aspects.map(([v, lb]) => ({ v, label: lb, on: n.props.aspect === v }));
+        // sd 2.5（StarCreate 特价版）：不支持自适应，只列平台 6 档画幅
+        const useAspects = (!isImg && /^sd\s*2\.5/i.test(n.props.model || ''))
+          ? aspects.filter(([v]) => v !== 'adaptive')
+          : aspects;
+        items = useAspects.map(([v, lb]) => ({ v, label: lb, on: n.props.aspect === v }));
       } else if (prop === 'model' || prop === 'textModel' || prop === 'voice') {
         // 图片/视频：按模式解析 kind；分栏式节点：按面板配置解析 kind 与字段
         const pane = PANE_TYPES[n.type];
@@ -350,7 +399,25 @@
           modelProp = isImg ? (n.props.mode === 'reverse' ? 'textModel' : 'model') : 'model';
         }
         const cur = n.props[modelProp];
-        items = LC.Settings.modelNames(kind).map((m) => ({ v: m, label: m, on: m === cur }));
+        let names = LC.Settings.modelNames(kind);
+        // 超清节点：只列超分专用模型；普通视频节点：排除超分专用模型（互不混淆）
+        if (LC.Settings.isUpscaleModel) {
+          if (pane && pane.upscaleOnly) names = names.filter((m) => LC.Settings.isUpscaleModel(m));
+          else if (kind === 'video') names = names.filter((m) => !LC.Settings.isUpscaleModel(m));
+        }
+        items = names.map((m) => ({ v: m, label: m, on: m === cur }));
+      } else if (n.type === 'upscale' && ['resolution', 'fps', 'toolVersion', 'scene', 'enhanceStyle'].includes(prop)) {
+        // 视频超清参数档位（22Ai video-enhance 枚举，价格倍率标注在选项里）
+        const UP = {
+          resolution: [['720p', '720P（×1）'], ['1080p', '1080P（×2）'], ['2k', '2K（×4）'], ['4k', '4K（×8）'], ['8k', '8K（×32）']],
+          fps: [['keep', '保持原帧率'], ['60', '60fps 智能插帧（×2）'], ['120', '120fps 智能插帧（×4）']],
+          toolVersion: [['standard', '标准版（速度均衡）'], ['professional', '专业版（效果优先·10倍价）']],
+          scene: [['aigc', 'AI 视频'], ['short_series', '短剧'], ['ugc', '短视频'], ['old_film', '老片修复']],
+          enhanceStyle: [['natural', '自然（推荐）'], ['hd', '高清锐利']],
+        };
+        const UP_DEF = { resolution: '1080p', fps: 'keep', toolVersion: 'standard', scene: 'aigc', enhanceStyle: 'natural' };
+        const upCur = n.props[prop] || UP_DEF[prop];
+        items = UP[prop].map(([v, lb]) => ({ v, label: lb, on: upCur === v }));
       } else if (prop === 'qualityRes') {
         items = [
           { v: '0|2K', label: '标准画质 2K', on: !Number(n.props.quality) && (n.props.resolution || '2K') === '2K' },

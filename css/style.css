@@ -327,6 +327,9 @@ kbd{ background:#28282c; border:1px solid #3a3a40; border-radius:3px; padding:0 
 /* 节点内本地上传：预览区右上角迷你按钮组 */
 .n-preview{ position:relative; }
 .n-progress{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:24px; font-weight:600; color:#fff; background:rgba(0,0,0,.5); border-radius:inherit; pointer-events:none; z-index:5; letter-spacing:1px; }
+/* 视频超清：底部紫色渐变横向进度条 */
+.n-progress-track{ position:absolute; left:12px; right:12px; bottom:10px; height:6px; border-radius:99px; background:rgba(255,255,255,.16); overflow:hidden; z-index:6; pointer-events:none; }
+.n-progress-fill{ display:block; height:100%; width:0%; border-radius:99px; background:linear-gradient(90deg,#8b5cf6,#6366f1); transition:width .35s ease; }
 .n-up-cnr{ position:absolute; top:5px; right:5px; display:flex; gap:4px; z-index:4; }
 .n-up-mini{ width:24px; height:24px; display:flex; align-items:center; justify-content:center;
   font-size:12px; color:var(--accent); background:rgba(18,18,20,.85); border:1px solid #5a4a2a;

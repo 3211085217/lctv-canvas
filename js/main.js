@@ -802,6 +802,58 @@
     },
   };
 
+  /* ---------- 使用日志：生成/报错记录（localStorage 持久化，顶栏「设置 → 使用日志」查看） ---------- */
+  LC.UsageLog = {
+    KEY: 'lc_usage_log', MAX: 300,
+    list() {
+      try { return JSON.parse(localStorage.getItem(this.KEY) || '[]'); } catch (e) { return []; }
+    },
+    save(arr) {
+      try { localStorage.setItem(this.KEY, JSON.stringify(arr.slice(0, this.MAX))); } catch (e) { /* 存储满则静默 */ }
+    },
+    log(type, msg) {
+      const arr = this.list();
+      arr.unshift({ t: Date.now(), type, msg: String(msg || '').slice(0, 500) });
+      this.save(arr);
+      if (window.__lcLogRefresh) { try { window.__lcLogRefresh(); } catch (e) {} }
+    },
+    clear() {
+      try { localStorage.removeItem(this.KEY); } catch (e) {}
+      if (window.__lcLogRefresh) { try { window.__lcLogRefresh(); } catch (e) {} }
+    },
+    open() {
+      const TAG = { error: ['✗ 错误', 'var(--err)'], ok: ['✓ 成功', 'var(--ok)'], run: ['▶ 生成', 'var(--text2)'], info: ['ℹ 信息', 'var(--text2)'] };
+      const rowsHTML = () => {
+        const arr = this.list();
+        return arr.length ? arr.map((l) => {
+          const [tag, color] = TAG[l.type] || [l.type, 'var(--text2)'];
+          return `<div style="display:flex;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);font-size:12.5px;align-items:baseline">
+            <span style="color:var(--text3);white-space:nowrap;font-size:11.5px">${U.formatTime(new Date(l.t))}</span>
+            <span style="color:${color};white-space:nowrap;font-weight:600">${tag}</span>
+            <span style="color:var(--text);word-break:break-all;flex:1">${U.esc(l.msg)}</span></div>`;
+        }).join('') : '<div style="color:var(--text3);padding:24px 0;text-align:center">暂无使用记录</div>';
+      };
+      const modal = LC.Modal.open(`<div id="usage-log-box" style="max-height:62vh;overflow-y:auto;padding:2px 4px">${rowsHTML()}</div>
+        <div style="display:flex;gap:8px;margin-top:12px;justify-content:space-between">
+          <span id="ulog-count" style="color:var(--text3);font-size:12px;line-height:30px">共 ${this.list().length} 条（最多保留 ${this.MAX} 条）</span>
+          <div style="display:flex;gap:8px">
+            <button class="p-btn" id="ulog-clear">清空日志</button>
+            <button class="p-btn primary" id="ulog-close">关闭</button>
+          </div>
+        </div>`, { title: `${U.icon('clock', 15)} 使用日志`, width: '680px' });
+      modal.body.querySelector('#ulog-clear').onclick = () => {
+        this.clear();
+        const b = modal.body.querySelector('#usage-log-box'); if (b) b.innerHTML = rowsHTML();
+        const c = modal.body.querySelector('#ulog-count'); if (c) c.textContent = '共 0 条（最多保留 ' + this.MAX + ' 条）';
+      };
+      modal.body.querySelector('#ulog-close').onclick = () => modal.close();
+      window.__lcLogRefresh = () => {
+        const b = modal.body && modal.body.querySelector('#usage-log-box');
+        if (b) b.innerHTML = rowsHTML();
+      };
+    },
+  };
+
   LC.App = App;
 
   // 启动（防重复初始化：DOMContentLoaded 与直呼只会执行一次）

@@ -35,6 +35,10 @@
       LC.App.graph.on((evt) => {
         if (evt === 'node:state') this.updateRunBtn();
       });
+      // 节点被删除：立即刷新面板（隐藏残留面板，避免绑定已删节点）
+      LC.App.graph.on((evt) => {
+        if (evt === 'node:remove') this.refresh();
+      });
       // 点击任何非节点、非面板区域 → 取消选中隐藏面板
       // （画布空白、左面板、菜单栏、工具栏等点击都生效）
       document.addEventListener('pointerdown', (e) => {
@@ -136,6 +140,10 @@
       const isImg = n.type === 'image';
       /* StarCreate 特价版（sd 2.5）：时长 30s / 分辨率 720p 锁死、画幅 6 选 1、仅参考生 */
       const isStar = !isImg && /^sd\s*2\.5/i.test(p.model || '');
+      /* paipu XG：画幅仅 16:9 / 9:16（默认 16:9）；时长 4~30s 可选、分辨率 720p 由能力表锁定 */
+      const isXg = !isImg && /xg/i.test(p.model || '');
+      /* xingxiaodu 渠道1：时长 30s / 分辨率 720p 锁死、画幅 6 选 1（默认 16:9） */
+      const isQd = !isImg && /渠道1/i.test(p.model || '');
 
       // ---------- 图片模型「档位」下拉：按模型能力动态（不写死） ----------
       // tt-image-2 → 画质 高/中/低；tt-image-2.5 / 官转、纳米香蕉 Pro → 分辨率 1K/2K/4K；其他 → null（走画质+分辨率组合）
@@ -158,15 +166,19 @@
       const modelKind = isImg ? (p.mode === 'reverse' ? 'text' : 'image') : 'video';
       const modelProp = isImg ? (p.mode === 'reverse' ? 'textModel' : 'model') : 'model';
       const modelOpts = () => {
-        const names = LC.Settings.modelNames(modelKind);
+        let names = LC.Settings.modelNames(modelKind);
+        // 视频节点：排除超分专用模型（只在「视频超清」节点可选）
+        if (modelKind === 'video' && LC.Settings.isUpscaleModel) names = names.filter((m) => !LC.Settings.isUpscaleModel(m));
         if (!names.length) return `<button class="pp-nomodel" data-open-settings>去设置添加模型</button>`;
         const cur = p[modelProp];
         const icon = `<span class="pp-model-ic">${U.icon('image', 14)}</span>`;
         return `<span class="pp-model">${icon}<button class="pp-drop" data-ppdrop="${modelProp}">${U.esc(cur)}<span class="pp-caret">▾</span></button></span>`;
       };
 
-      // 画幅：自定义下拉按钮（视频含"自适应"；sd 2.5 无自适应，6 选 1）
-      const aspLabel = isStar ? ((p.aspect && p.aspect !== 'adaptive') ? p.aspect : '9:16')
+      // 画幅：自定义下拉按钮（视频含"自适应"；sd 2.5 无自适应 6 选 1；XG 仅 16:9/9:16；渠道1 无自适应 6 选 1）
+      const aspLabel = isXg ? (['16:9', '9:16'].includes(p.aspect) ? p.aspect : '16:9')
+        : isStar ? ((p.aspect && p.aspect !== 'adaptive') ? p.aspect : '9:16')
+        : isQd ? (['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'].includes(p.aspect) ? p.aspect : '16:9')
         : ((!isImg && (!p.aspect || p.aspect === 'adaptive')) ? '自适应' : (p.aspect || '1:1'));
       const aspectSel = `<button class="pp-drop pp-drop-sm" data-ppdrop="aspect" title="选择画幅比例">${aspLabel}<span class="pp-caret">▾</span></button>`;
 
@@ -176,14 +188,14 @@
           ? (ttLabel || '自适应')
           : (Number(p.quality) ? '高清' : '标准') + '画质 ' + (p.resolution || '2K'))
         : (p.duration || 5) + 's';
-      // 视频时长：迷你 range 滑块（替代下拉）；sd 2.5 锁死 30s 显示固定文本；图片仍用下拉
+      // 视频时长：迷你 range 滑块（替代下拉）；sd 2.5 / 渠道1 锁死 30s 显示固定文本；图片仍用下拉
       const vModel = p.model || '';
       const durMax = /seedance.*2\.5|seedance-2-5/i.test(vModel) ? 30 : 15;
-      const durCur = isStar ? 30 : (Number(p.duration) || 5);
+      const durCur = (isStar || isQd) ? 30 : (Number(p.duration) || 5);
       const qualitySel = isImg
         ? `<button class="pp-drop pp-drop-sm" data-ppdrop="${ttCfg ? 'ttTier' : 'qualityRes'}">${qualityLabel}<span class="pp-caret">▾</span></button>`
-        : isStar
-          ? `<span class="pp-dur-slider" title="sd 2.5 时长固定 30 秒"><span class="pp-dur-val">30s（固定）</span></span>`
+        : (isStar || isQd)
+          ? `<span class="pp-dur-slider" title="时长固定 30 秒"><span class="pp-dur-val">30s（固定）</span></span>`
           : `<span class="pp-dur-slider" title="拖动选时长"><input type="range" class="pp-dur-range" min="4" max="${durMax}" step="1" value="${durCur}"><span class="pp-dur-val">${durCur}s</span></span>`;
 
       // 模式 chips（图片）
@@ -192,8 +204,8 @@
         return modes.map(([v, lb]) =>
           `<span class="pp-chip${p.mode === v ? ' on' : ''}" data-ppchip="mode=${v}">${lb}</span>`).join('');
       })() : (() => {
-        // sd 2.5：仅参考生（锁死，不给切换）
-        if (isStar) return `<span class="pp-chip on">参考生</span>`;
+        // sd 2.5 / 渠道1：仅参考生（锁死，不给切换）；渠道1 额外显示「人脸过审」开关（默认开）
+        if (isStar || isQd) return `<span class="pp-chip on">参考生</span>${isQd ? `<span class="pp-chip${p.face !== false ? ' on' : ''}" data-ppact="face" title="参考图带真人时开启，帮助通过上游肖像权校验（默认开启）">人脸过审</span>` : ''}`;
         // H3 三模式（旧 i2v 归一为首尾帧）
         const cur = (p.mode === 'shouweizhen' || p.mode === 'i2v') ? 'shouweizhen' : 'cankaosheng';
         const modes = [['shouweizhen', '首尾帧'], ['cankaosheng', '参考生']];
@@ -255,7 +267,7 @@
       this.updateRunBtn();
     },
 
-    /* ---------- 分栏式节点（文本/音频/脚本/字幕/视频超清）：简版面板 — 提示词输入 + 模型选择 + 生成 ---------- */
+    /* ---------- 分栏式节点（文本/音频/脚本/字幕/视频超清）：简版面板 ---------- */
     renderPane(n, cfg) {
       this.closeStylePicker();
       this.closeDropPicker();
@@ -304,7 +316,10 @@
       }
       this.el.innerHTML = `
         <div class="pp-inner">
-          <div class="pp-node-title" title="当前面板绑定的节点（下方 ▶ 只生成这个节点）">${U.icon('target', 12)} ${U.esc(n.title)}</div>
+          <div class="pp-node-title" style="display:flex;justify-content:space-between;align-items:center;gap:6px" title="当前面板绑定的节点（下方 ▶ 只生成这个节点）">
+            <span>${U.icon('target', 12)} ${U.esc(n.title)}</span>
+            <button class="pp-zoom" data-ppact="zoom" title="放大编辑文本">${U.icon('maximize', 14)}</button>
+          </div>
           <div class="pp-input-wrap">
             <div class="pp-input" contenteditable="true" spellcheck="false" data-ppprop="${cfg.promptProp}"
               data-placeholder="${cfg.placeholder}">${LC.Mention.textToHTML(p[cfg.promptProp] || '')}</div>
@@ -383,10 +398,13 @@
           ['adaptive', '自适应'], ['16:9', '16:9'], ['9:16', '9:16'], ['1:1', '1:1'],
           ['4:3', '4:3'], ['3:4', '3:4'], ['21:9', '21:9'],
         ];
-        // sd 2.5（StarCreate 特价版）：不支持自适应，只列平台 6 档画幅
-        const useAspects = (!isImg && /^sd\s*2\.5/i.test(n.props.model || ''))
-          ? aspects.filter(([v]) => v !== 'adaptive')
-          : aspects;
+        // sd 2.5（StarCreate 特价版）：不支持自适应，只列平台 6 档画幅；XG：仅 2 档；渠道1：6 档无自适应
+        const isXgM = (!isImg && /xg/i.test(n.props.model || ''));
+        const isQdM = (!isImg && /渠道1/i.test(n.props.model || ''));
+        const isSdM = (!isImg && /^sd\s*2\.5/i.test(n.props.model || ''));
+        const useAspects = isXgM
+          ? aspects.filter(([v]) => ['16:9', '9:16'].includes(v))
+          : (isSdM || isQdM ? aspects.filter(([v]) => v !== 'adaptive') : aspects);
         items = useAspects.map(([v, lb]) => ({ v, label: lb, on: n.props.aspect === v }));
       } else if (prop === 'model' || prop === 'textModel' || prop === 'voice') {
         // 图片/视频：按模式解析 kind；分栏式节点：按面板配置解析 kind 与字段
@@ -564,6 +582,11 @@
         else if (a === 'voice') {
           this.toggleVoice(n);
         }
+        else if (a === 'face') {
+          n.props.face = (n.props.face === false);
+          LC.App.saveSoon();
+          this.render(n);
+        }
       });
 
       // input 事件：duration range 滑块实时拖动
@@ -585,6 +608,7 @@
     /* ---------- 语音输入（本地 vosk-server WebSocket 流式，边说边出字） ---------- */
     // 后端 vosk_ws.py 监听 ws://127.0.0.1:2700,接收 16kHz mono 16-bit PCM,返回 partial/text
     toggleVoice(n) {
+      if (n && PANE_TYPES[n.type] && PANE_TYPES[n.type].noInput) return;   // 无输入框节点（视频超清）不支持语音输入
       if (this._voiceOn) this._stopVoice();
       else this._startVoice(n);
     },
@@ -785,6 +809,7 @@
     bindEvents(n) {
       const el = this.el;
       const ed = U.$('.pp-input', el);
+      if (!ed) return;   // 无输入框面板（视频超清）：模型/运行按钮事件由 bindPanel 委托，无需绑定输入
       ed.addEventListener('input', () => {
         n.props[this.promptPropOf(n)] = LC.Mention.toText(ed);
         LC.App.saveSoon();
@@ -792,11 +817,59 @@
         if (PANE_TYPES[n.type] && LC.App.nodes) LC.App.nodes.updateNode(n.id);
         if (LC.Mention) LC.Mention.check(ed, n);   // @提及检测：输入 @ 弹出节点选择菜单
       });
+      // 失焦规范化：点空白处离开时规整文本（去行尾空白/压缩空行），
+      // 保证下次点回来重新渲染的排版与刚才一致，不再“变回去”
+      ed.addEventListener('blur', (e) => {
+        if (e.relatedTarget && this.el && this.el.contains(e.relatedTarget)) return;   // 焦点去了面板内控件：不打断操作
+        const prop = this.promptPropOf(n);
+        const cur = String(n.props[prop] || '');
+        const norm = (LC.Mention && LC.Mention.normalizeText) ? LC.Mention.normalizeText(cur) : cur;
+        if (norm === cur) return;
+        n.props[prop] = norm;
+        LC.App.saveSoon();
+        if (PANE_TYPES[n.type] && LC.App.nodes) LC.App.nodes.updateNode(n.id);
+        if (this.el && !this.el.hidden) this.render(n);
+      });
       // @提及：菜单打开后由 Mention.key 处理方向键/Enter/Esc 导航
       // （菜单弹出由上方 input 事件的 Mention.check 负责）
       ed.addEventListener('keydown', (e) => {
         if (LC.Mention && LC.Mention.key(e)) return;
-        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); LC.Executor.run(n.id); }
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); LC.Executor.run(n.id); return; }
+        if (e.key === 'Enter') {
+          // 统一换行语义：默认情况 Chrome 会插 <div>，导致存储/渲染往返时行序“变回去”；
+          // 且光标停在不可编辑的 @引用块之前时回车会把光标顶到块上方——先纠正光标到块后，再插 <br>
+          e.preventDefault();
+          const sel = window.getSelection();
+          if (sel && sel.rangeCount) {
+            const r = sel.getRangeAt(0);
+            const sc = r.startContainer;
+            // 光标位置的下一个节点恰是 @引用块（不可编辑）：把光标挪到块之后，保证换行发生在块下方
+            if (sc && sc.nodeType === 1 && sc.childNodes && sc.childNodes[r.startOffset] && sc.childNodes[r.startOffset].nodeType === 1) {
+              const nxt = sc.childNodes[r.startOffset];
+              if (nxt.classList && nxt.classList.contains('pp-mention')) {
+                r.setStart(sc, r.startOffset + 1);
+                r.collapse(true);
+                sel.removeAllRanges();
+                sel.addRange(r);
+              }
+            }
+          }
+          if (!document.execCommand('insertLineBreak')) {
+            // execCommand 不可用时的兜底：手动插入 <br>
+            const s2 = window.getSelection();
+            if (s2 && s2.rangeCount) {
+              const r2 = s2.getRangeAt(0);
+              const br = document.createElement('br');
+              r2.deleteContents();
+              r2.insertNode(br);
+              r2.setStartAfter(br);
+              r2.collapse(true);
+              s2.removeAllRanges();
+              s2.addRange(r2);
+            }
+          }
+          return;
+        }
       });
     },
 

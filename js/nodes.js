@@ -31,6 +31,8 @@
     if (!modelName) return VIDEO_RESOLUTIONS;
     // 硬编码已知模型（与 settings.js 预置同步，防止 localStorage 同步异常时仍能正确显示）
     if (/^sd\s*2\.5/i.test(modelName)) return [['720P', '720P']];   // StarCreate 特价版：仅 720p
+    if (/xg/i.test(modelName)) return [['720P', '720P']];   // paipu Seedance 2.5 XG：仅 720p
+    if (/渠道1/i.test(modelName)) return [['720P', '720P']];   // xingxiaodu 渠道1：仅 720p
     if (/viduq3/i.test(modelName)) return [['540P', '540P'], ['720P', '720P'], ['1080P', '1080P']];
     if (/minimax.*h3|^h3|H3$/i.test(modelName)) return [['768P', '768P'], ['1080P', '1080P'], ['2K', '2K'], ['4K', '4K']];
     if (/seedance.*2\.5|seedance-2-5/i.test(modelName)) return [['480P', '480P'], ['720P', '720P'], ['1080P', '1080P']];
@@ -50,7 +52,9 @@
    * Vidu Q3：仅参考图 1-7；H3：图 9/视频 3/音频 3；Seedance：图 30/视频 10/音频 10 */
   function videoRefCaps(modelName) {
     if (!modelName) return { img: 9, vid: 3, aud: 3 };     // 兜底（H3 规格）
-    if (/^sd\s*2\.5/i.test(modelName)) return { img: 9, vid: 0, aud: 0 };   // StarCreate 特价版：仅参考图 ≤9
+    if (/^sd\s*2\.5/i.test(modelName)) return { img: 9, vid: 0, aud: 0 };   // StarCreate 特价版：仅参考图 ≤9，无视频/音频参考
+    if (/xg/i.test(modelName)) return { img: 30, vid: 0, aud: 10 };   // paipu XG：图≤30 音频≤10，无视频参考
+    if (/渠道1/i.test(modelName)) return { img: 30, vid: 0, aud: 10 };   // xingxiaodu 渠道1：图≤30 音频≤10(mp3)，无视频参考
     if (/viduq3/i.test(modelName)) return { img: 7, vid: 0, aud: 0 };
     if (/hailuo.*h3|h3特价/i.test(modelName)) return { img: 9, vid: 0, aud: 0 };   // 海螺 H3 参考生：仅参考图，无视频/音频参考
     if (/minimax.*h3|^h3|H3$/i.test(modelName)) return { img: 9, vid: 3, aud: 3 };
@@ -62,6 +66,7 @@
   /* 按当前视频模型查视频时长范围：Seedance 2.5 支持 4~30 秒，其余 4~15 秒 */
   function videoDurations(modelName) {
     if (/^sd\s*2\.5/i.test(modelName || '')) return [[30, '30s']];   // StarCreate 特价版：时长锁死 30 秒
+    if (/渠道1/i.test(modelName || '')) return [[30, '30s']];   // xingxiaodu 渠道1：时长锁死 30 秒
     const max = /seedance.*2\.5|seedance-2-5/i.test(modelName || '') ? 30 : 15;
     const arr = [];
     for (let s = 4; s <= max; s++) arr.push([s, s + 's']);
@@ -178,6 +183,7 @@
 
         // 其他控件
         if (hit('[data-adv]')) { e.stopPropagation(); n.props._adv = !n.props._adv; this.updateNode(n.id); return; }
+        if (hit('[data-face]')) { e.stopPropagation(); n.props.face = (n.props.face === false); this.updateNode(n.id); LC.App.saveSoon(); return; }
         if (hit('[data-preset]')) { e.stopPropagation(); this.openPresetMenu(n, hit('[data-preset]')); return; }
         if (hit('[data-open-settings]')) { e.stopPropagation(); LC.Settings.open(); return; }
         if (hit('[data-open-stage]')) { e.stopPropagation(); LC.App.openStage(n); return; }
@@ -562,10 +568,23 @@
           /* StarCreate 特价版（sd 2.5）：时长/分辨率锁死、画幅 6 选 1、仅参考生（按次计费模型，参数不可自由组合） */
           const isStar = /^sd\s*2\.5/i.test(p.model || '');
           const STAR_ASPECTS = [['9:16', '9:16'], ['3:4', '3:4'], ['4:3', '4:3'], ['16:9', '16:9'], ['21:9', '21:9'], ['1:1', '1:1']];
+          /* paipu XG（seedance 2.5 XG）：画幅仅 16:9 / 9:16（默认 16:9），时长 4~30 可选、分辨率 720p 由能力表锁定 */
+          const isXg = !isStar && /xg/i.test(p.model || '');
+          const XG_ASPECTS = [['16:9', '16:9'], ['9:16', '9:16']];
+          /* xingxiaodu 渠道1（seedance 2.5 渠道1）：时长/分辨率锁死（30s / 720p），画幅 6 选 1，仅参考生 */
+          const isQd = !isStar && !isXg && /渠道1/i.test(p.model || '');
+          const QD_ASPECTS = [['16:9', '16:9'], ['9:16', '9:16'], ['1:1', '1:1'], ['4:3', '4:3'], ['3:4', '3:4'], ['21:9', '21:9']];
           if (isStar) {
             if (p.mode !== 'cankaosheng') { p.mode = 'cankaosheng'; LC.App.saveSoon(); }
             if (!STAR_ASPECTS.some(([v]) => v === p.aspect)) { n.props.aspect = '9:16'; LC.App.saveSoon(); }
+          } else if (isXg && p.mode === 'shouweizhen') {
+            p.mode = 'cankaosheng'; LC.App.saveSoon();   // XG 无首尾帧语义，仅参考生/文生
+          } else if (isQd && p.mode !== 'cankaosheng') {
+            p.mode = 'cankaosheng'; LC.App.saveSoon();   // 渠道1 无首尾帧语义，仅参考生/文生
           }
+          const xgAspectOK = (a) => ['16:9', '9:16'].includes(a);
+          if (isXg && !xgAspectOK(p.aspect)) { n.props.aspect = '16:9'; LC.App.saveSoon(); }
+          if (isQd && !QD_ASPECTS.some(([v]) => v === p.aspect)) { n.props.aspect = '16:9'; LC.App.saveSoon(); }
           // 按当前模型查支持的分辨率档位；当前 p.resolution 不在支持列表则自动校正到第一档
           const vRes = videoResolutions(p.model);
           let curRes = vRes.length ? vRes[0][0] : '768P';
@@ -587,11 +606,12 @@
           if (curDur < durMin || curDur > durMax) { curDur = Math.min(durMax, Math.max(durMin, curDur)); n.props.duration = curDur; LC.App.saveSoon(); }
           const fixedChip = (txt) => `<span class="nc-dur"><span class="nc-dur-val">${txt}（固定）</span></span>`;
           return `
-            ${isStar ? '' : `<div class="nc-row nc-chips">${chips(VIDEO_MODES, () => vMode, 'mode')}</div>`}
-            ${(!isStar && vMode === 'shouweizhen') ? `<div class="nc-row nc-dual"><button class="nc-btn" data-upframe>⬆ 首帧</button><button class="nc-btn" data-uplast>⬆ 尾帧</button></div>` : ''}
-            ${(!isStar && vMode === 'cankaosheng') ? `<div class="nc-row">${refBtns.join('')}</div>` : (isStar ? `<div class="nc-row">${refBtns.join('')}</div>` : '')}
-            <div class="nc-row nc-model-row">${modelSel('model', 'video', p.model, '暂无视频模型')}${sel('aspect', isStar ? STAR_ASPECTS : VIDEO_ASPECTS, isStar ? (p.aspect || '9:16') : (p.aspect || 'adaptive'))}</div>
-            <div class="nc-row nc-dual">${isStar ? fixedChip('30s') + fixedChip('720P') : `${durSlider(curDur, durMin, durMax)}${sel('resolution', vRes, curRes)}`}</div>`;
+            ${(isStar || isQd) ? '' : `<div class="nc-row nc-chips">${chips(VIDEO_MODES, () => vMode, 'mode')}</div>`}
+            ${(!isStar && !isQd && vMode === 'shouweizhen') ? `<div class="nc-row nc-dual"><button class="nc-btn" data-upframe>⬆ 首帧</button><button class="nc-btn" data-uplast>⬆ 尾帧</button></div>` : ''}
+            ${(!isStar && !isQd && vMode === 'cankaosheng') ? `<div class="nc-row">${refBtns.join('')}</div>` : ((isStar || isQd) ? `<div class="nc-row">${refBtns.join('')}</div>` : '')}
+            ${isQd ? `<div class="nc-row"><span class="nc-chip${p.face !== false ? ' on' : ''}" data-face title="参考图带真人时开启，帮助通过上游肖像权校验（默认开启）">人脸过审</span></div>` : ''}
+            <div class="nc-row nc-model-row">${modelSel('model', 'video', p.model, '暂无视频模型')}${sel('aspect', isStar ? STAR_ASPECTS : (isXg ? XG_ASPECTS : (isQd ? QD_ASPECTS : VIDEO_ASPECTS)), isStar ? (p.aspect || '9:16') : (isXg ? (p.aspect || '16:9') : (isQd ? (p.aspect || '16:9') : (p.aspect || 'adaptive'))))}</div>
+            <div class="nc-row nc-dual">${(isStar || isQd) ? fixedChip('30s') + fixedChip('720P') : `${durSlider(curDur, durMin, durMax)}${sel('resolution', vRes, curRes)}`}</div>`;
         }
 
         case 'stage':

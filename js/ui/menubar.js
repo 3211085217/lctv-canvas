@@ -116,6 +116,10 @@
           try { LC.Settings.open(); }
           catch (err) { console.error(err); LC.App.toast('设置打开失败：' + err.message, 'err'); }
           break;
+        case 'usage-log':
+          try { LC.UsageLog && LC.UsageLog.open(); }
+          catch (err) { console.error(err); LC.App.toast('使用日志打开失败：' + err.message, 'err'); }
+          break;
         case 'help-about': this.help(); break;
       }
     },

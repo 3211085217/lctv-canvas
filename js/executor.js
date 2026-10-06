@@ -125,6 +125,8 @@
         if (LC.App.forceSave) LC.App.forceSave();   // 立即持久化 running 状态 + taskId，刷新后可恢复
         // 第三方上游任务钩子：任务创建时把 ext 写入节点状态并保存 → 刷新后据此续轮询原任务，绝不重复生成
         LC.__onExtTask = (ext) => { if (ext && ext.extTaskId) { n.state.extTask = ext; if (LC.App && LC.App.saveSoon) LC.App.saveSoon(); } };
+        // 使用日志：开始
+        if (window.LC && LC.UsageLog) LC.UsageLog.log('run', `开始生成「${n.title}」${n.props.model ? ' · 模型 ' + n.props.model : ''}`);
         // 平滑进度动画：1% → 99% 逐帧递增，API 真实进度更高时同步跳变
         let displayProg = 0;
         let lastBackendSync = 0;   // 动画进度同步后端的节流时间戳
@@ -163,9 +165,11 @@
         LC.App.registerAsset(n);
         // 使用统计 + 生成记录（成功一次记一次；失败不影响主流程）
         this.recordGen(n, creditKind);
+        if (window.LC && LC.UsageLog) LC.UsageLog.log('ok', `生成完成「${n.title}」${n.state.output?.meta?.model ? ' · ' + n.state.output.meta.model : ''}`);
       } catch (err) {
         n.state.status = 'error';
         n.state.error = err.message;
+        if (window.LC && LC.UsageLog) LC.UsageLog.log('error', `「${n.title}」生成失败：${err.message}`);
         LC.App.toast(`「${n.title}」执行失败：${err.message}`, 'err');
         // 生成失败退款：任务未提交到上游（无 extTask = 上游没收钱）才退回积分
         if (this._paidKind && LC.Credit) {
@@ -324,6 +328,7 @@
       } catch (err) {
         n.state.status = 'error';
         n.state.error = err.message;
+        if (window.LC && LC.UsageLog) LC.UsageLog.log('error', `「${n.title}」任务恢复失败：${err.message}`);
         LC.App.toast(`「${n.title}」任务恢复失败：${err.message}`, 'err');
         LC.App.nodes.updateNode(id);
         g.emit('change');
@@ -407,7 +412,9 @@
           if (!prompt) throw new Error('请先输入视频提示词（描述动作/运镜）再生成');
           // 视频两模式：首尾帧 / 参考生（默认参考生=图生；连线连上资产自动带参考）
           const isStar = /^sd\s*2\.5/i.test(p.model || '');   // StarCreate 特价版：仅参考生，参数锁死
-          const mode = isStar ? 'cankaosheng' : ((p.mode === 'shouweizhen' || p.mode === 'i2v') ? 'shouweizhen' : 'cankaosheng');
+          const isXg = /xg/i.test(p.model || '');   // paipu XG：仅参考生/文生，无首尾帧、无视频参考
+          const isQd = /渠道1/i.test(p.model || '');   // xingxiaodu 渠道1：仅参考生/文生，无首尾帧、无视频参考
+          const mode = (isStar || isXg || isQd) ? 'cankaosheng' : ((p.mode === 'shouweizhen' || p.mode === 'i2v') ? 'shouweizhen' : 'cankaosheng');
           const upVids = (inp.videos || []).map((v) => v && (v._dataURL || v.dataURL)).filter(Boolean);
           const upAuds = (inp.audio || []).map((a) => a && (a._dataURL || a.dataURL || a.data)).filter(Boolean);
           // 首尾帧：只用本地手动上传的首帧/尾帧，不掺入上游连线图片（首尾帧语义固定为首帧+尾帧）
@@ -423,9 +430,9 @@
           // 参考生：本地槽位 + 上游图/视频/音频合并（slotData 与 collect 已过滤 null）
           const isVidu = /viduq3/i.test(p.model || '');
           const isSeed = /seedance/i.test(p.model || '');
-          const capImg = isStar ? 9 : (isVidu ? 7 : (isSeed ? 30 : 9));   // StarCreate 特价版：仅参考图 ≤9
-          const capVid = isStar ? 0 : (isSeed ? 10 : (isVidu ? 0 : 3));
-          const capAud = isStar ? 0 : (isSeed ? 10 : (isVidu ? 0 : 3));
+          const capImg = isStar ? 9 : (isVidu ? 7 : (isSeed ? 30 : 9));   // StarCreate 特价版：仅参考图 ≤9；XG/渠道1 走 isSeed 分支=30 ✓
+          const capVid = (isStar || isXg || isQd) ? 0 : (isSeed ? 10 : (isVidu ? 0 : 3));   // XG/渠道1 不支持参考视频
+          const capAud = isStar ? 0 : (isSeed ? 10 : (isVidu ? 0 : 3));   // XG/渠道1 走 isSeed 分支=10 ✓
           const refImgs = [...(await slotData(p.refImages)), ...(inp.images || [])].filter(Boolean).slice(0, capImg);
           const _fp = (s) => (typeof s === 'string' ? (s.slice(0, 14) + '…' + s.slice(-8) + '[' + s.length + ']') : '?');
           console.log('[视频参考图诊断] mode=%s 本地槽=%d 上游连线=%d 合计=%d → %s',
@@ -435,13 +442,15 @@
           const refAuds = [...(await slotData(p.refAudios)), ...upAuds].filter(Boolean).slice(0, capAud);
           const opts = {
             model: p.model,
-            duration: isStar ? 30 : p.duration,   // StarCreate 特价版：时长锁死 30s
-            aspect: isStar ? (['9:16', '3:4', '4:3', '16:9', '21:9', '1:1'].includes(p.aspect) ? p.aspect : '9:16') : p.aspect,
-            resolution: isStar ? '720p' : p.resolution,   // StarCreate 特价版：分辨率锁死 720p
+            duration: (isStar || isQd) ? 30 : p.duration,   // StarCreate / 渠道1：时长锁死 30s
+            aspect: isStar ? (['9:16', '3:4', '4:3', '16:9', '21:9', '1:1'].includes(p.aspect) ? p.aspect : '9:16')
+              : (isQd ? (['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'].includes(p.aspect) ? p.aspect : '16:9') : p.aspect),
+            resolution: (isStar || isQd) ? '720p' : p.resolution,   // StarCreate / 渠道1：分辨率锁死 720p
+            face: isQd ? (p.face !== false) : undefined,   // 渠道1 过脸处理：默认开，节点「人脸过审」开关可关；其他模型不传
             mode, style: p.style, light: p.light,
             images: mode === 'shouweizhen' ? swImgs : [],
             refImages: mode === 'cankaosheng' ? refImgs : [],
-            refVideos: (mode === 'cankaosheng' && !isStar) ? refVids : [],
+            refVideos: (mode === 'cankaosheng' && !isStar && !isXg && !isQd) ? refVids : [],
             refAudios: (mode === 'cankaosheng' && !isStar) ? refAuds : [],
           };
           return AI.run('genVideo', { prompt, ...opts }, progress, taskId);

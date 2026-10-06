@@ -3,7 +3,7 @@
  * ===================================================== */
 (function () {
   const U = LC.U;
-  const __LC_VER = 18;   // 与 version.json 的 v 对齐：老标签页检测到远端更新会自动刷新，无需手动强刷
+  const __LC_VER = 19;   // 与 version.json 的 v 对齐：老标签页检测到远端更新会自动刷新，无需手动强刷
 
   /* 版本自检：远端 version.json 的 v 比本文件新 → 提示并自动刷新页面 */
   function verCheck() {

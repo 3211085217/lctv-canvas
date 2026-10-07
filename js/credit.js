@@ -11,6 +11,7 @@
     device: null,
     balance: 0,
     prices: { image: 1, video: 2, audio: 1, text: 0 },
+    vrates: null,   // 后端下发的视频按秒计费表 [{label, rate}]（充值窗展示用）
 
     /* 浏览器设备号：同一浏览器积分共享，跨浏览器不互通（每人各自充值） */
     _devId() {
@@ -38,6 +39,7 @@
       if (j && typeof j.credits === 'number') {
         this.balance = j.credits;
         if (j.prices) this.prices = j.prices;
+        if (j.vrates) this.vrates = j.vrates;
       }
       this.render();
       const btn = U.$('#credit-btn');
@@ -61,18 +63,20 @@
         if (j && typeof j.credits === 'number') {
           this.balance = j.credits;
           if (j.prices) this.prices = j.prices;
+          if (j.vrates) this.vrates = j.vrates;
         }
       } catch (e) {}
       this.render();
     },
 
     /* 生成前扣费：后端定价（kind: image/video/audio）。
+       视频生成额外传 {duration, model}：命中按秒计费模型时后端按 时长×单价 算价。
        返回 true=可继续生成；false=余额不足（已弹充值窗）。
        后端不可达时放行（fail-open）：充值系统故障不应卡死整个画布。 */
-    async consume(kind) {
+    async consume(kind, extra) {
       if (!this.device) this.device = this._devId();
       try {
-        const j = await this._post('/consume', { device: this.device, kind });
+        const j = await this._post('/consume', Object.assign({ device: this.device, kind }, extra || {}));
         if (!j) return true;
         if (typeof j.credits === 'number') this.balance = j.credits;
         this.render();
@@ -83,10 +87,10 @@
       } catch (e) { return true; }
     },
 
-    /* 生成失败且未提交到上游时退款（调用方触发） */
-    async refund(kind) {
+    /* 生成失败且未提交到上游时退款（调用方触发；extra 与 consume 一致，后端按实扣金额原路退回） */
+    async refund(kind, extra) {
       try {
-        const j = await this._post('/refund', { device: this.device, kind });
+        const j = await this._post('/refund', Object.assign({ device: this.device, kind }, extra || {}));
         if (j && typeof j.credits === 'number') { this.balance = j.credits; this.render(); }
         if (j) LC.App.toast(`本次生成失败，${j.price} 积分已退回`, 'ok');
       } catch (e) {}
@@ -98,6 +102,7 @@
       const priceHtml = Object.entries(this.prices)
         .map(([k, v]) => `${({ image: '图片', video: '视频', audio: '音频', text: '文本' })[k] || k} ${v}`)
         .join(' · ');
+      const vrateHtml = (this.vrates || []).map((v) => `${v.label} ${v.rate}积分/秒`).join(' · ');
       const m = LC.Modal.open(`
         <div class="credit-box">
           <div class="credit-bal">当前积分：<b id="credit-bal-b">${this.balance}</b><span class="credit-rate">1 元 = 1 积分</span></div>
@@ -116,7 +121,7 @@
             <input id="credit-code" class="mp-input" placeholder="输入卡密，如 CARD005-xxxxxxxx-xxxxxxxx" spellcheck="false">
             <button id="credit-redeem" class="btn primary">兑换</button>
           </div>
-          <div class="credit-prices">计费：${priceHtml}（价格可调整，以页面显示为准）</div>
+          <div class="credit-prices">计费：${priceHtml}${vrateHtml ? `<br>视频按秒计费：${vrateHtml}` : ''}（价格可调整，以页面显示为准）</div>
         </div>`,
         { title: `${U.icon('dot', 14)} 积分充值`, width: '430px', maskClose: true });
       this._modalEl = m;

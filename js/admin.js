@@ -38,15 +38,12 @@ let _credits = null;   // {账号:积分} 快照（来自后端 /api/credit/admi
 /* 积分后端地址：后台若与 serve.py 同域（onrender.com）则用相对路径；否则指向 Render 固定地址 */
 const CREDIT_API = (location.host.includes('onrender.com')) ? '' : 'https://lctv-canvas.onrender.com';
 
-/* 积分管理密码：优先取输入框，其次读 sessionStorage 缓存 */
+/* 积分管理密码：本机 sessionStorage 记住，首次在「加积分」弹窗里填一次即可 */
 function creditPwd() {
-  const el = $('#credit-pwd');
-  if (el && el.value.trim()) {
-    const p = el.value.trim();
-    try { sessionStorage.setItem('lc_credit_pwd', p); } catch (e) {}
-    return p;
-  }
   try { return sessionStorage.getItem('lc_credit_pwd') || ''; } catch (e) { return ''; }
+}
+function saveCreditPwd(p) {
+  try { sessionStorage.setItem('lc_credit_pwd', p); } catch (e) {}
 }
 
 /* 从后端拉取所有账号积分（需积分管理密码） */
@@ -72,7 +69,7 @@ async function fetchCredits() {
 
 async function adjustCredit(u, delta) {
   const pwd = creditPwd();
-  if (!pwd) throw new Error('请先在「积分管理」里填写积分管理密码');
+  if (!pwd) throw new Error('请输入积分管理密码');
   const r = await fetch(CREDIT_API + '/api/credit/admin/adjust', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -152,13 +149,8 @@ async function adjustCredit(u, delta) {
         await A.adminSetPassword(u, pw);
         alert('已重置「' + u + '」的密码');
       } else if (b.dataset.op === 'credit') {
-        const amt = prompt('为「' + u + '」调整多少积分？（填正数=加，负数=减）');
-        if (amt == null) return;
-        const num = Number(String(amt).trim());
-        if (!isFinite(num) || num === 0) { alert('请输入有效的非零数字'); return; }
-        busy('调整中…');
-        const j = await adjustCredit(u, num);
-        alert(`已调整「${u}」积分：本次 ${j.delta >= 0 ? '+' : ''}${j.delta}，当前余额 ${j.credits}`);
+        openCreditModal(u);
+        return;
       } else if (b.dataset.op === 'deluser') {
         if (!confirm('确定永久删除用户「' + u + '」？\n将同时删除 TA 的全部画布、图片、视频、使用统计和生成记录，且无法恢复。')) return;
         const typed = prompt('此操作不可恢复。请再次输入「' + u + '」确认删除：');
@@ -213,15 +205,49 @@ async function adjustCredit(u, delta) {
     $('#nu-btn').disabled = false;
   });
 
-  /* ---------- 积分管理：加载余额 ---------- */
-  $('#credit-refresh').addEventListener('click', async () => {
-    $('#credit-refresh').disabled = true;
+  /* ---------- 加积分弹窗 ---------- */
+  let _creditTarget = null;
+  function openCreditModal(u) {
+    _creditTarget = u;
+    $('#cm-user').textContent = u;
+    $('#cm-delta').value = '';
+    $('#cm-err').textContent = '';
+    $('#cm-pwd').value = creditPwd();
+    $('#credit-modal').hidden = false;
+    setTimeout(() => { const d = $('#cm-delta'); if (d) d.focus(); }, 60);
+  }
+  function closeCreditModal() {
+    $('#credit-modal').hidden = true;
+    _creditTarget = null;
+  }
+  $('#cm-close').addEventListener('click', closeCreditModal);
+  $('#cm-cancel').addEventListener('click', closeCreditModal);
+  $('#credit-modal').addEventListener('click', (e) => { if (e.target && e.target.id === 'credit-modal') closeCreditModal(); });
+  $('#cm-delta').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#cm-ok').click(); });
+  $('#cm-pwd').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#cm-ok').click(); });
+
+  $('#cm-ok').addEventListener('click', async () => {
+    const u = _creditTarget;
+    if (!u) return;
+    const amt = $('#cm-delta').value.trim();
+    const num = Number(amt);
+    const pwd = $('#cm-pwd').value.trim();
+    const err = $('#cm-err');
+    err.textContent = '';
+    if (amt === '' || !isFinite(num) || num === 0) { err.textContent = '请输入有效的非零数字（正数加、负数减）'; $('#cm-delta').focus(); return; }
+    if (!pwd) { err.textContent = '请输入积分管理密码'; $('#cm-pwd').focus(); return; }
+    saveCreditPwd(pwd);
+    const ok = $('#cm-ok');
+    ok.disabled = true; ok.textContent = '调整中…';
     try {
+      const j = await adjustCredit(u, num);
+      closeCreditModal();
       await refresh();
-    } catch (err) {
-      alert('加载失败：' + err.message);
+      alert(`已调整「${u}」积分：本次 ${j.delta >= 0 ? '+' : ''}${j.delta}，当前余额 ${j.credits}`);
+    } catch (e2) {
+      err.textContent = e2.message || '调整失败';
     }
-    $('#credit-refresh').disabled = false;
+    ok.disabled = false; ok.textContent = '确定加积分';
   });
 
   /* ---------- 退出 ---------- */

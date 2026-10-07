@@ -35,6 +35,9 @@
   let _users = [];   // 最近一次用户列表快照
 let _credits = null;   // {账号:积分} 快照（来自后端 /api/credit/admin/list；null=未取到）
 
+/* 积分后端地址：后台若与 serve.py 同域（onrender.com）则用相对路径；否则指向 Render 固定地址 */
+const CREDIT_API = (location.host.includes('onrender.com')) ? '' : 'https://lctv-canvas.onrender.com';
+
 /* 积分管理密码：优先取输入框，其次读 sessionStorage 缓存 */
 function creditPwd() {
   const el = $('#credit-pwd');
@@ -51,7 +54,7 @@ async function fetchCredits() {
   const pwd = creditPwd();
   if (!pwd) { _credits = null; return; }
   try {
-    const r = await fetch('/api/credit/admin/list', {
+    const r = await fetch(CREDIT_API + '/api/credit/admin/list', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password: pwd }),
@@ -70,7 +73,7 @@ async function fetchCredits() {
 async function adjustCredit(u, delta) {
   const pwd = creditPwd();
   if (!pwd) throw new Error('请先在「积分管理」里填写积分管理密码');
-  const r = await fetch('/api/credit/admin/adjust', {
+  const r = await fetch(CREDIT_API + '/api/credit/admin/adjust', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ password: pwd, account: u, delta: delta }),

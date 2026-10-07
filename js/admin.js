@@ -35,50 +35,40 @@
   let _users = [];   // 最近一次用户列表快照
 let _credits = null;   // {账号:积分} 快照（来自后端 /api/credit/admin/list；null=未取到）
 
-/* 积分后端地址：后台若与 serve.py 同域（onrender.com）则用相对路径；否则指向 Render 固定地址 */
-const CREDIT_API = (location.host.includes('onrender.com')) ? '' : 'https://lctv-canvas.onrender.com';
+/* 积分账本存 GitHub 数据仓库 credit/ledger.json（与 accounts.json 同款，纯前端读写） */
+const CREDIT_PATH = 'credit/ledger.json';
 
-/* 积分管理密码：本机 sessionStorage 记住，首次在「加积分」弹窗里填一次即可 */
-function creditPwd() {
-  try { return sessionStorage.getItem('lc_credit_pwd') || ''; } catch (e) { return ''; }
-}
-function saveCreditPwd(p) {
-  try { sessionStorage.setItem('lc_credit_pwd', p); } catch (e) {}
-}
-
-/* 从后端拉取所有账号积分（需积分管理密码） */
+/* 从账本拉取所有账号积分 */
 async function fetchCredits() {
-  const pwd = creditPwd();
-  if (!pwd) { _credits = null; return; }
   try {
-    const r = await fetch(CREDIT_API + '/api/credit/admin/list', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: pwd }),
-    });
-    const j = await r.json().catch(() => null);
-    if (j && Array.isArray(j.accounts)) {
+    const m = await LC.GH.readJSONAPI(CREDIT_PATH);
+    const data = (m && m.m && typeof m.m === 'object') ? m.m : null;
+    if (data && data.accounts && typeof data.accounts === 'object') {
       const map = {};
-      j.accounts.forEach((a) => { map[a.account] = a.credits; });
+      Object.keys(data.accounts).forEach((k) => { map[k] = data.accounts[k].credits || 0; });
       _credits = map;
     } else {
-      _credits = null;
+      _credits = {};
     }
   } catch (e) { _credits = null; }
 }
 
+/* 给指定账号加减积分（读-改-写账本，靠管理员登录鉴权） */
 async function adjustCredit(u, delta) {
-  const pwd = creditPwd();
-  if (!pwd) throw new Error('请输入积分管理密码');
-  const r = await fetch(CREDIT_API + '/api/credit/admin/adjust', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password: pwd, account: u, delta: delta }),
+  const ok = await LC.GH.mergeJSON(CREDIT_PATH, (m) => {
+    const mm = (m && typeof m === 'object' && !Array.isArray(m)) ? m : { accounts: {}, prices: {} };
+    if (!mm.accounts || typeof mm.accounts !== 'object') mm.accounts = {};
+    const rec = mm.accounts[u] || { credits: 0 };
+    rec.credits = Math.round((((rec.credits || 0) + delta)) * 100) / 100;
+    if (!rec.joined) rec.joined = Math.floor(Date.now() / 1000);
+    mm.accounts[u] = rec;
+    return mm;
   });
-  const j = await r.json().catch(() => null);
-  if (!j) throw new Error('服务器无响应（积分接口需与后端同域部署）');
-  if (j.error) throw new Error(j.error);
-  return j;
+  if (!ok) throw new Error('积分账本更新失败（GitHub 写入频率限制或网络抖动，稍后再试）');
+  const m2 = await LC.GH.readJSONAPI(CREDIT_PATH);
+  const data = (m2 && m2.m && typeof m2.m === 'object') ? m2.m : {};
+  const credits = (data.accounts && data.accounts[u]) ? data.accounts[u].credits : delta;
+  return { account: u, delta, credits };
 }
 
   /* ---------- 用户表格 + 统计 ---------- */
@@ -212,7 +202,6 @@ async function adjustCredit(u, delta) {
     $('#cm-user').textContent = u;
     $('#cm-delta').value = '';
     $('#cm-err').textContent = '';
-    $('#cm-pwd').value = creditPwd();
     $('#credit-modal').hidden = false;
     setTimeout(() => { const d = $('#cm-delta'); if (d) d.focus(); }, 60);
   }
@@ -224,19 +213,15 @@ async function adjustCredit(u, delta) {
   $('#cm-cancel').addEventListener('click', closeCreditModal);
   $('#credit-modal').addEventListener('click', (e) => { if (e.target && e.target.id === 'credit-modal') closeCreditModal(); });
   $('#cm-delta').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#cm-ok').click(); });
-  $('#cm-pwd').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#cm-ok').click(); });
 
   $('#cm-ok').addEventListener('click', async () => {
     const u = _creditTarget;
     if (!u) return;
     const amt = $('#cm-delta').value.trim();
     const num = Number(amt);
-    const pwd = $('#cm-pwd').value.trim();
     const err = $('#cm-err');
     err.textContent = '';
     if (amt === '' || !isFinite(num) || num === 0) { err.textContent = '请输入有效的非零数字（正数加、负数减）'; $('#cm-delta').focus(); return; }
-    if (!pwd) { err.textContent = '请输入积分管理密码'; $('#cm-pwd').focus(); return; }
-    saveCreditPwd(pwd);
     const ok = $('#cm-ok');
     ok.disabled = true; ok.textContent = '调整中…';
     try {

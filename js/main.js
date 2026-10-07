@@ -5,13 +5,16 @@
   const U = LC.U;
   const __LC_VER = 20;   // 与 version.json 的 v 对齐：老标签页检测到远端更新会自动刷新，无需手动强刷
 
-  /* 版本自检：远端 version.json 的 v 比本文件新 → 提示并自动刷新页面 */
+  /* 版本自检：远端 version.json 的 v 比本文件新 → 提示并自动刷新页面。
+   sessionStorage 护栏：一个会话最多自动刷新一次，旧代码缓存 + 新版本号也不会死循环 */
   function verCheck() {
     try {
+      if (sessionStorage.getItem('lc_ver_reloaded')) return;
       fetch('version.json?t=' + Date.now())
         .then((r) => r.json())
         .then((j) => {
           if (j && typeof j.v === 'number' && j.v > __LC_VER) {
+            sessionStorage.setItem('lc_ver_reloaded', '1');
             try { if (window.LC && LC.App && LC.App.toast) LC.App.toast('版本已更新，正在自动刷新…', 'ok'); } catch (e) {}
             setTimeout(() => { try { location.reload(); } catch (e) {} }, 1500);
           }

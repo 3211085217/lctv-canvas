@@ -57,6 +57,26 @@
     const dur = Math.min(120, Math.max(1, Math.round(Number(p.duration) || 5)));
     return { perSec, dur, total: Math.round(perSec * dur * 100) / 100 };
   }
+  /* 图片模型按张计费（与后端 serve.py _credit_price 一致）：
+   * gpt-image-2 → 0.1 积分/张；gpt-image-2.5 → 1K=0.15 / 2K=0.2 / 4K=0.25；
+   * 纳米香蕉 Pro → 1K=0.16 / 2K=0.22 / 4K=0.35；其余未命中 → 默认 1 积分/张 */
+  function cloudImageFee(node) {
+    const p = (node && node.props) ? node.props : {};
+    const ml = String(p.model || '').toLowerCase();
+    const res = String(p.imgRes || p.resolution || '');
+    if (ml === 'gpt-image-2') return { perItem: 0.1 };
+    if (ml === 'gpt-image-2.5') {
+      if (/4k/i.test(res)) return { perItem: 0.25 };
+      if (/2k/i.test(res)) return { perItem: 0.2 };
+      return { perItem: 0.15 };
+    }
+    if (ml.includes('纳米香蕉')) {
+      if (/4k/i.test(res)) return { perItem: 0.35 };
+      if (/2k/i.test(res)) return { perItem: 0.22 };
+      return { perItem: 0.16 };
+    }
+    return null;   // 未命中 → 默认 1 积分/张（后端 prices.image）
+  }
 
   const Panel = {
     el: null,
@@ -266,10 +286,17 @@
             : `<button class="pp-tag" data-ppact="ref" title="导入本地视频文件（作为成片透传）"><span class="pp-plus">+</span>本地视频</button>`);
 
       // 风格按钮固定显示"风格"，选中后右侧显示风格名
-      // 价格徽标：仅视频节点，写在 ▶ 生成旁边（云端计费，表值与后端 serve.py 定价一致）
-      const feeHtml = n.type !== 'video' ? '' : (() => {
-        const fee = cloudVideoFee(n);
+      // 价格徽标：仅视频/图片节点，写在 ▶ 生成旁边（云端计费，表值与后端 serve.py 定价一致）
+      const feeHtml = (n.type !== 'video' && n.type !== 'image') ? '' : (() => {
         const fs = 'margin-right:8px;padding:3px 8px;border-radius:6px;background:rgba(208,184,138,.12);color:#d0b88a;font-size:11px;white-space:nowrap';
+        if (n.type === 'image') {
+          const fee = cloudImageFee(n);
+          const price = fee && fee.perItem != null ? fee.perItem : 1;
+          const count = Number(n.props.count || 1);
+          const total = Math.round(price * count * 100) / 100;
+          return `<span class="pp-fee" style="${fs}" title="${price} 积分/张 × ${count} 张">${price} 积分/张${count > 1 ? ` ×${count}张 ≈${total}` : ''}</span>`;
+        }
+        const fee = cloudVideoFee(n);
         if (fee && fee.perItem != null) return `<span class="pp-fee" style="${fs}" title="该视频模型按条计费（后端定价）">${fee.perItem} 积分/条</span>`;
         if (fee) return `<span class="pp-fee" style="${fs}" title="${fee.perSec} 积分/秒 × ${fee.dur} 秒">≈${fee.total} 积分</span>`;
         return `<span class="pp-fee" style="${fs}" title="该视频模型按条计费（后端定价）">2 积分/条</span>`;

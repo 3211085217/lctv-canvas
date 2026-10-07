@@ -8,12 +8,12 @@
   const U = LC.U;
 
   const Credit = {
-    device: null,
+    account: null,
     balance: 0,
     prices: { image: 1, video: 2, audio: 1, text: 0 },
     vrates: null,   // 后端下发的视频按秒计费表 [{label, rate}]（充值窗展示用）
 
-    /* 浏览器设备号：同一浏览器积分共享，跨浏览器不互通（每人各自充值） */
+    /* 浏览器设备号：仅作「未登录游客」的兜底标识；登录后一律按账号记积分 */
     _devId() {
       let d = localStorage.getItem('lcc_device');
       if (!d) {
@@ -21,6 +21,15 @@
         localStorage.setItem('lcc_device', d);
       }
       return d;
+    },
+
+    /* 积分账户标识 = 当前登录账号名（一人一份、跨设备通用）；未登录退回设备号 */
+    _account() {
+      try {
+        const u = (window.LC && LC.Auth && LC.Auth.currentName) ? LC.Auth.currentName() : '';
+        if (u) return u;
+      } catch (e) {}
+      return this._devId();
     },
 
     async _post(action, body) {
@@ -32,19 +41,25 @@
       return r.json().catch(() => null);
     },
 
-    /* 页面启动：注册设备 + 拉余额 */
+    /* 页面启动：注册账号 + 拉余额 */
     async init() {
-      this.device = this._devId();
-      const j = await this._post('/register', { device: this.device });
+      await this.resync();
+      this._inited = true;
+      this.render();
+      const btn = U.$('#credit-btn');
+      if (btn) btn.onclick = () => this.openRecharge();
+    },
+
+    /* 登录/登出后账号变化时重拉余额（auth.js afterLogin 会调用） */
+    async resync() {
+      this.account = this._account();
+      const j = await this._post('/register', { account: this.account });
       if (j && typeof j.credits === 'number') {
         this.balance = j.credits;
         if (j.prices) this.prices = j.prices;
         if (j.vrates) this.vrates = j.vrates;
       }
-      this._inited = true;
       this.render();
-      const btn = U.$('#credit-btn');
-      if (btn) btn.onclick = () => this.openRecharge();
     },
 
     render() {
@@ -59,7 +74,9 @@
 
     async refresh() {
       try {
-        const r = await fetch('/api/credit?device=' + encodeURIComponent(this.device));
+        const a = this._account();
+        if (a !== this.account) { await this.resync(); return; }
+        const r = await fetch('/api/credit?account=' + encodeURIComponent(this.account));
         const j = await r.json().catch(() => null);
         if (j && typeof j.credits === 'number') {
           this.balance = j.credits;
@@ -75,7 +92,7 @@
        返回 true=可继续生成；false=余额不足（已弹充值窗）。
        强制口径：余额为 0 直接拦、后端无响应/不可达也一律拦（绝不 fail-open 白嫖）。 */
     async consume(kind, extra) {
-      if (!this.device) this.device = this._devId();
+      this.account = this._account();
       // 强制：余额已知为 0 直接拦截，不等后端
       if (this._inited && this.balance <= 0) {
         LC.App.toast('「积分不足」请先充值后再生成', 'warn');
@@ -83,7 +100,7 @@
         return false;
       }
       try {
-        const j = await this._post('/consume', Object.assign({ device: this.device, kind }, extra || {}));
+        const j = await this._post('/consume', Object.assign({ account: this.account, kind }, extra || {}));
         if (!j) {
           LC.App.toast('积分服务无响应，本次生成已拦截', 'warn');
           return false;
@@ -103,7 +120,8 @@
     /* 生成失败且未提交到上游时退款（调用方触发；extra 与 consume 一致，后端按实扣金额原路退回） */
     async refund(kind, extra) {
       try {
-        const j = await this._post('/refund', Object.assign({ device: this.device, kind }, extra || {}));
+        this.account = this._account();
+        const j = await this._post('/refund', Object.assign({ account: this.account, kind }, extra || {}));
         if (j && typeof j.credits === 'number') { this.balance = j.credits; this.render(); }
         if (j) LC.App.toast(`本次生成失败，${j.price} 积分已退回`, 'ok');
       } catch (e) {}
@@ -149,7 +167,7 @@
         const btn = U.$('#credit-redeem', box);
         btn.disabled = true; btn.textContent = '兑换中…';
         try {
-          const j = await this._post('/redeem', { device: this.device, code });
+          const j = await this._post('/redeem', { account: this.account, code });
           if (!j) { LC.App.toast('兑换失败：服务器无响应，请稍后再试', 'err'); }
           else if (j.error) { LC.App.toast(j.error, 'err'); }
           else {

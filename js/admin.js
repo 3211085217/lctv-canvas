@@ -33,6 +33,53 @@
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   let _users = [];   // 最近一次用户列表快照
+let _credits = null;   // {账号:积分} 快照（来自后端 /api/credit/admin/list；null=未取到）
+
+/* 积分管理密码：优先取输入框，其次读 sessionStorage 缓存 */
+function creditPwd() {
+  const el = $('#credit-pwd');
+  if (el && el.value.trim()) {
+    const p = el.value.trim();
+    try { sessionStorage.setItem('lc_credit_pwd', p); } catch (e) {}
+    return p;
+  }
+  try { return sessionStorage.getItem('lc_credit_pwd') || ''; } catch (e) { return ''; }
+}
+
+/* 从后端拉取所有账号积分（需积分管理密码） */
+async function fetchCredits() {
+  const pwd = creditPwd();
+  if (!pwd) { _credits = null; return; }
+  try {
+    const r = await fetch('/api/credit/admin/list', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pwd }),
+    });
+    const j = await r.json().catch(() => null);
+    if (j && Array.isArray(j.accounts)) {
+      const map = {};
+      j.accounts.forEach((a) => { map[a.account] = a.credits; });
+      _credits = map;
+    } else {
+      _credits = null;
+    }
+  } catch (e) { _credits = null; }
+}
+
+async function adjustCredit(u, delta) {
+  const pwd = creditPwd();
+  if (!pwd) throw new Error('请先在「积分管理」里填写积分管理密码');
+  const r = await fetch('/api/credit/admin/adjust', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: pwd, account: u, delta: delta }),
+  });
+  const j = await r.json().catch(() => null);
+  if (!j) throw new Error('服务器无响应（积分接口需与后端同域部署）');
+  if (j.error) throw new Error(j.error);
+  return j;
+}
 
   /* ---------- 用户表格 + 统计 ---------- */
   async function refresh() {
@@ -40,6 +87,7 @@
     $('#ad-who').textContent = '👤 ' + me;
     const users = await A.adminList();
     _users = users;
+    await fetchCredits();
     // 并行拉取每个用户的统计与画布数（用户多时避免串行慢）
     const rowsData = await Promise.all(users.map(async (u) => ({
       u,
@@ -54,6 +102,7 @@
       totalCanvas += n;
       totalGen += imgs + vids;
       if (u.disabled) disabled++;
+      const cred = _credits ? (_credits[u.u] != null ? _credits[u.u] : 0) : null;
       return `<tr>
         <td>
           <a class="ulink" href="user.html?u=${encodeURIComponent(u.u)}" target="_blank" rel="noopener" title="在新标签页查看该用户详情">${esc(u.u)}</a>
@@ -65,9 +114,11 @@
         <td class="num">${imgs}</td>
         <td class="num">${vids}</td>
         <td class="num">${n}</td>
+        <td class="num">${cred == null ? '<span style="color:var(--text3)">—</span>' : cred}</td>
         <td class="ops">
           <button class="btn sm" data-op="toggle" data-u="${esc(u.u)}">${u.disabled ? '启用' : '禁用'}</button>
           <button class="btn sm" data-op="pwd" data-u="${esc(u.u)}">重置密码</button>
+          <button class="btn sm" data-op="credit" data-u="${esc(u.u)}">加积分</button>
           ${u.role !== 'admin' ? `<button class="btn sm danger" data-op="deluser" data-u="${esc(u.u)}">删除用户</button>` : ''}
         </td></tr>`;
     });
@@ -97,6 +148,14 @@
         busy('处理中…');
         await A.adminSetPassword(u, pw);
         alert('已重置「' + u + '」的密码');
+      } else if (b.dataset.op === 'credit') {
+        const amt = prompt('为「' + u + '」调整多少积分？（填正数=加，负数=减）');
+        if (amt == null) return;
+        const num = Number(String(amt).trim());
+        if (!isFinite(num) || num === 0) { alert('请输入有效的非零数字'); return; }
+        busy('调整中…');
+        const j = await adjustCredit(u, num);
+        alert(`已调整「${u}」积分：本次 ${j.delta >= 0 ? '+' : ''}${j.delta}，当前余额 ${j.credits}`);
       } else if (b.dataset.op === 'deluser') {
         if (!confirm('确定永久删除用户「' + u + '」？\n将同时删除 TA 的全部画布、图片、视频、使用统计和生成记录，且无法恢复。')) return;
         const typed = prompt('此操作不可恢复。请再次输入「' + u + '」确认删除：');
@@ -149,6 +208,17 @@
       alert('创建失败：' + err.message);
     }
     $('#nu-btn').disabled = false;
+  });
+
+  /* ---------- 积分管理：加载余额 ---------- */
+  $('#credit-refresh').addEventListener('click', async () => {
+    $('#credit-refresh').disabled = true;
+    try {
+      await refresh();
+    } catch (err) {
+      alert('加载失败：' + err.message);
+    }
+    $('#credit-refresh').disabled = false;
   });
 
   /* ---------- 退出 ---------- */

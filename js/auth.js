@@ -99,6 +99,7 @@
   function afterLogin(u) {
     open(u);
     if (LC.Home) LC.Home.switchAccount();
+    if (LC.Credit) LC.Credit.resync().catch(() => {});
   }
 
   /* ---------- 登录 / 注册 / 登出 ---------- */
@@ -149,6 +150,7 @@
       try { LC.Home._currentId = null; } catch (e) {}
       try { LC.Home._deleted = new Set(); } catch (e) {}
     }
+    if (LC.Credit) LC.Credit.resync().catch(() => {});
     gate();
   }
 

@@ -100,16 +100,24 @@
     </div>
   </section>
   <section class="card">
+    <h2>积分管理（后端账本，前端改不了）</h2>
+    <div class="row">
+      <input id="credit-pwd" class="inp" type="password" placeholder="积分管理密码（见 serve.log 的 admin password）" autocomplete="off" spellcheck="false">
+      <button id="credit-refresh" class="btn">加载积分</button>
+    </div>
+    <div class="hint">积分余额存在服务器账本（不在浏览器前端，改前端无效）。在此填入「积分管理密码」即可查看每个账号的积分，并给指定账号加减积分。</div>
+  </section>
+  <section class="card">
     <h2>用户管理</h2>
     <div class="tbl-wrap">
       <table>
         <thead><tr>
-          <th>用户名（点击进入详情）</th><th>密码</th><th>状态</th><th>登录次数</th><th>生成图</th><th>生成视频</th><th>画布数</th><th>操作</th>
+          <th>用户名（点击进入详情）</th><th>密码</th><th>状态</th><th>登录次数</th><th>生成图</th><th>生成视频</th><th>画布数</th><th>积分</th><th>操作</th>
         </tr></thead>
         <tbody id="user-tbody"></tbody>
       </table>
     </div>
-    <div class="hint">点用户名 → 新标签页打开该用户的详细界面（图片/视频生成记录切换查看、提示词、使用次数）。</div>
+    <div class="hint">点用户名 → 新标签页打开该用户的详细界面（图片/视频生成记录切换查看、提示词、使用次数）。「加积分」需先在顶部「积分管理」填入积分管理密码。</div>
   </section>
 </div>
 

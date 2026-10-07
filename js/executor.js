@@ -106,11 +106,16 @@
       const n = g.getNode(id);
       if (!n || this.running.has(id)) return;
       // 积分扣费（云端充值系统）：后端按 kind 定价；余额不足 → 弹充值窗并中止本次生成
+      // 视频生成带上 {duration, model}：命中按秒计费模型（viduq3 / MiniMax H3）时按 时长×单价 收费
       const creditKind = { image: 'image', video: 'video', audio: 'audio', upscale: 'video' }[n.type];
       if (creditKind && LC.Credit) {
-        const allowed = await LC.Credit.consume(creditKind);
+        const creditExtra = creditKind === 'video'
+          ? { duration: Number(n.props.duration) || 5, model: n.props.model || '' }
+          : {};
+        const allowed = await LC.Credit.consume(creditKind, creditExtra);
         if (!allowed) return;
         this._paidKind = creditKind;
+        this._paidExtra = creditExtra;
       }
       this.running.add(id);   // 先标记：防止 @/连线 循环引用导致无限递归
       let progTimer = null;
@@ -173,14 +178,16 @@
         LC.App.toast(`「${n.title}」执行失败：${err.message}`, 'err');
         // 生成失败退款：任务未提交到上游（无 extTask = 上游没收钱）才退回积分
         if (this._paidKind && LC.Credit) {
-          if (!n.state.extTask) LC.Credit.refund(this._paidKind);
+          if (!n.state.extTask) LC.Credit.refund(this._paidKind, this._paidExtra || {});
           this._paidKind = null;
+          this._paidExtra = null;
         }
       } finally {
         if (progTimer) clearInterval(progTimer);
         LC.__onExtTask = null;
         this.running.delete(id);
         this._paidKind = null;
+        this._paidExtra = null;
       }
       LC.App.nodes.updateNode(id);
       g.emit('change');

@@ -46,9 +46,10 @@
         const base = (SD20_BASE[tier] || {})[res.toUpperCase()];
         if (base != null) perSec = Math.round((base + 0.1) * 10000) / 10000;
       }
-      // seedance-2.5 官方模型：固定单价（统一按「不含视频」口径），排除 XG / 渠道1
+      // seedance-2.5 官方模型：固定单价 + 0.1 加价（每秒加 1 毛，统一按「不含视频」口径），排除 XG / 渠道1
       if (perSec == null && /seedance/.test(ml) && (/2\.5/.test(ml) || /2-5/.test(ml)) && !/xg/.test(ml) && !/渠道1/.test(ml)) {
-        perSec = SD25_RATES[res.toUpperCase()];
+        const base = SD25_RATES[res.toUpperCase()];
+        if (base != null) perSec = Math.round((base + 0.1) * 10000) / 10000;
       }
     }
     if (perSec == null) return null;   // 未命中按秒计费表 → 按条计费

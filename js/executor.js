@@ -163,13 +163,19 @@
             } catch (e) {}
           }
         };
+        // 到达 99% 后若上游仍未终态，在 93~99 区间持续"呼吸"——只要上游在跑进度条就一直在动，绝不静止
+        let progDir = 1;
         progTimer = setInterval(() => {
-          if (displayProg < 99) {
+          if (progDir === 1) {
+            if (displayProg >= 99) { progDir = -1; return; }
             const inc = displayProg < 30 ? 2 : displayProg < 60 ? 1 : displayProg < 85 ? 0.5 : 0.2;
             setProg(Math.min(99, displayProg + inc));
+          } else {
+            if (displayProg <= 93) progDir = 1;
+            else setProg(Math.max(93, displayProg - 0.4));
           }
         }, 500);
-        const progress = (p) => { if (p > displayProg) setProg(p); };
+        const progress = (p) => { if (p > displayProg) { progDir = 1; setProg(p); } };
         // AI.run 会直接复用运行开始已持久化的 n.state.taskId（presetTaskId），保证中途刷新可查
         n.state.output = await this.dispatch(n, progress, n.state.taskId);
         LC.App.nodes.updateNode(id);          // 结果先本地秒显，云端上传在后台持久化
@@ -184,9 +190,9 @@
         n.state.error = err.message;
         if (window.LC && LC.UsageLog) LC.UsageLog.log('error', `「${n.title}」生成失败：${err.message}`);
         LC.App.toast(`「${n.title}」执行失败：${err.message}`, 'err');
-        // 生成失败退款：任务未提交到上游（无 extTask = 上游没收钱）才退回积分
+        // 生成失败退款：报错即全额退回本次扣费（上游已扣的不追回，由平台兜底）
         if (this._paidKind && LC.Credit) {
-          if (!n.state.extTask) LC.Credit.refund(this._paidKind, this._paidExtra || {});
+          LC.Credit.refund(this._paidKind, this._paidExtra || {});
           this._paidKind = null;
           this._paidExtra = null;
         }

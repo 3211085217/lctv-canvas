@@ -22,7 +22,7 @@
 
   /* ============ 云端计费价格徽标（与后端 serve.py 定价表一致，改价必须前后端同步改） ============
    * viduq3 / MiniMax H3：固定 0.15 积分/秒
-   * seedance 2.0 系列（迷你/快速/标准）：单价 = 基础价 + 0.5 积分/秒，总价 = 单价 × 时长（统一按不含视频口径）
+   * seedance 2.0 系列（迷你/快速/标准）：单价 = 基础价 + 0.1 积分/秒，总价 = 单价 × 时长（统一按不含视频口径）
    * 其余视频模型：平账 2 积分/条（后端原定价，此处只做展示） */
   const SD20_BASE = {
     mini: { '480P': 0.1872, '720P': 0.2617, '1080P': 0.4793, '4K': 0.7011 },
@@ -42,7 +42,7 @@
       else if (/seedance/.test(ml) && (/2\.0/.test(ml) || /2-0/.test(ml))) tier = 'std';
       if (tier) {
         const base = (SD20_BASE[tier] || {})[res.toUpperCase()];
-        if (base != null) perSec = Math.round((base + 0.5) * 10000) / 10000;
+        if (base != null) perSec = Math.round((base + 0.1) * 10000) / 10000;
       }
     }
     if (perSec == null) return null;   // 未命中按秒计费表 → 按条计费

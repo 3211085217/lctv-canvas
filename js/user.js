@@ -18,7 +18,7 @@
       fetch('version.json?t=' + Date.now())
         .then((r) => r.json())
         .then((j) => {
-          if (j && typeof j.v === 'number' && j.v > 21) {
+          if (j && typeof j.v === 'number' && j.v > 22) {
             sessionStorage.setItem('lc_ver_reloaded', '1');
             setTimeout(() => { try { location.reload(); } catch (e) {} }, 800);
           }

@@ -119,7 +119,7 @@
       if (creditKind && LC.Credit) {
         const creditExtra = creditKind === 'video'
           ? { duration: Number(n.props.duration) || 5, model: n.props.model || '', resolution: n.props.resolution || '' }
-          : {};
+          : (creditKind === 'image' ? { model: n.props.model || '' } : {});
         const allowed = await LC.Credit.consume(creditKind, creditExtra);
         if (!allowed) return;
         this._paidKind = creditKind;

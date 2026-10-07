@@ -191,8 +191,8 @@
           options: [['auto', '自适应'], ['1K', '1K'], ['2K', '2K'], ['4K', '4K']] };
         if (/banana-pro/i.test(id)) return { prop: 'imgRes', def: '2K',
           options: [['1K', '1K'], ['2K', '2K'], ['4K', '4K']] };
-        if (/^tt-image-2($|-)/i.test(id)) return { prop: 'imgQuality', def: 'high',
-          options: [['high', '画质·高'], ['medium', '画质·中'], ['low', '画质·低']] };
+        if (/^tt-image-2($|-)/i.test(id)) return { prop: 'imgQuality', def: 'medium',
+          options: [['medium', '1K']] };   // gpt-image-2 固定 1K 档（0.1 积分/张）
         return null;
       };
       const ttCfg = isImg && LC.Settings ? ttTierCfg((LC.Settings.findModel(p.model, 'image') || {}).modelId) : null;

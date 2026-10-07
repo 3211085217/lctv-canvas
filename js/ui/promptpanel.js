@@ -52,6 +52,7 @@
         if (base != null) perSec = Math.round((base + 0.1) * 10000) / 10000;
       }
     }
+    if (perSec == null && /渠道1/.test(ml)) return { perItem: 2.5 };   // xingxiaodu 渠道1：按次计费 2.5 积分/条
     if (perSec == null) return null;   // 未命中按秒计费表 → 按条计费
     const dur = Math.min(120, Math.max(1, Math.round(Number(p.duration) || 5)));
     return { perSec, dur, total: Math.round(perSec * dur * 100) / 100 };
@@ -268,9 +269,10 @@
       // 价格徽标：仅视频节点，写在 ▶ 生成旁边（云端计费，表值与后端 serve.py 定价一致）
       const feeHtml = n.type !== 'video' ? '' : (() => {
         const fee = cloudVideoFee(n);
-        return fee
-          ? `<span class="pp-fee" style="margin-right:8px;padding:3px 8px;border-radius:6px;background:rgba(208,184,138,.12);color:#d0b88a;font-size:11px;white-space:nowrap" title="${fee.perSec} 积分/秒 × ${fee.dur} 秒">≈${fee.total} 积分</span>`
-          : `<span class="pp-fee" style="margin-right:8px;padding:3px 8px;border-radius:6px;background:rgba(208,184,138,.12);color:#d0b88a;font-size:11px;white-space:nowrap" title="该视频模型按条计费（后端定价）">2 积分/条</span>`;
+        const fs = 'margin-right:8px;padding:3px 8px;border-radius:6px;background:rgba(208,184,138,.12);color:#d0b88a;font-size:11px;white-space:nowrap';
+        if (fee && fee.perItem != null) return `<span class="pp-fee" style="${fs}" title="该视频模型按条计费（后端定价）">${fee.perItem} 积分/条</span>`;
+        if (fee) return `<span class="pp-fee" style="${fs}" title="${fee.perSec} 积分/秒 × ${fee.dur} 秒">≈${fee.total} 积分</span>`;
+        return `<span class="pp-fee" style="${fs}" title="该视频模型按条计费（后端定价）">2 积分/条</span>`;
       })();
       this.el.innerHTML = `
         <div class="pp-inner">
@@ -318,7 +320,10 @@
       const box = U.$('.pp-fee', this.el);
       if (!box) return;
       const fee = cloudVideoFee(n);
-      if (fee) {
+      if (fee && fee.perItem != null) {
+        box.textContent = fee.perItem + ' 积分/条';
+        box.title = '该视频模型按条计费（后端定价）';
+      } else if (fee) {
         box.textContent = '≈' + fee.total + ' 积分';
         box.title = fee.perSec + ' 积分/秒 × ' + fee.dur + ' 秒';
       } else {

@@ -162,27 +162,29 @@
   }
 
   /* ---------- 画布 ---------- */
-  /* 列表：当前用户 manifest + 云端文件树合并 → 过滤已删文件但仍留索引的幽灵条目 */
+  /* 列表：以云端文件树为准（权威），manifest 仅补 name/时间元信息；
+   * 文件树（api.github.com）读取失败时 throw，交由调用方回退本地缓存，
+   * 避免 raw.githubusercontent 抖动导致用户画布"凭空消失"。 */
   async function list() {
     if (!uname()) return [];
-    try {
-      const u = uname();
-      const prefix = 'projects/' + u + '/';
-      const [m, tree] = await Promise.all([
-        userManifest(),
-        (async () => {
-          const x = await gh('/git/trees/' + CFG.branch + '?recursive=1');
-          const set = new Set();
-          ((x && x.data && x.data.tree) || []).forEach((it) => {
-            if (it.type === 'blob' && it.path.startsWith(prefix) && it.path.endsWith('.json')) {
-              set.add(it.path.slice(prefix.length, -'.json'.length));
-            }
-          });
-          return set;
-        })(),
-      ]);
-      return (m.projects || []).filter((p) => p.id && tree.has(p.id));
-    } catch (e) { return []; }
+    const u = uname();
+    const prefix = 'projects/' + u + '/';
+    const x = await gh('/git/trees/' + CFG.branch + '?recursive=1');
+    if (!x || !x.data || !Array.isArray(x.data.tree)) throw new Error('云端画布列表读取失败');
+    const ids = new Set();
+    x.data.tree.forEach((it) => {
+      if (it.type === 'blob' && it.path.startsWith(prefix) && it.path.endsWith('.json')) {
+        ids.add(it.path.slice(prefix.length, -'.json'.length));
+      }
+    });
+    // manifest 仅供补充 name/时间；读取失败不致命（用空元信息兜底，画布仍按文件树列出）
+    let m = { projects: [] };
+    try { m = await userManifest(); } catch (e) { m = { projects: [] }; }
+    const meta = new Map((m.projects || []).filter((p) => p && p.id).map((p) => [p.id, p]));
+    return [...ids].map((id) => {
+      const mt = meta.get(id) || {};
+      return { id, name: mt.name || '', createdAt: mt.createdAt || '', updatedAt: mt.updatedAt || '' };
+    });
   }
 
   /* 保存画布：工程文件 + 该用户索引并行提交（失败抛错由调用方兜底缓存） */

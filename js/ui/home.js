@@ -66,7 +66,11 @@
         // 在线：以云端为准（删除即消失）；本地缓存仅补充展示信息，杜绝"云端已删、缓存复活"
         disk.forEach((p) => {
           const c = cached.find((x) => x.id === p.id);
-          byId.set(p.id, { ...(c || {}), ...p, cached: false });
+          const merged = { ...(c || {}), ...p, cached: false };
+          if (!merged.name && c && c.name) merged.name = c.name;   // 云端 raw 抖动 name 为空 → 用本地缓存名兜底
+          if (!merged.createdAt && c && c.createdAt) merged.createdAt = c.createdAt;
+          if (!merged.updatedAt && c && c.updatedAt) merged.updatedAt = c.updatedAt;
+          byId.set(p.id, merged);
         });
       } else {
         // 离线：退回本地缓存

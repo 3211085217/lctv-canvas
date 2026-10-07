@@ -9,13 +9,19 @@
   const G = LC.GH;
   const $ = (s) => document.querySelector(s);
 
-  /* 版本自检：老标签页检测到远端更新后自动刷新 */
+  /* 版本自检：老标签页检测到远端更新后自动刷新。
+   常量必须与 version.json 的 v 保持一致（20）；sessionStorage 护栏保证一个会话最多自动刷新一次，
+   杜绝「旧版本号常数 + 新远端版本」造成的死循环刷新。 */
   (function verCheck() {
     try {
+      if (sessionStorage.getItem('lc_ver_reloaded')) return;
       fetch('version.json?t=' + Date.now())
         .then((r) => r.json())
         .then((j) => {
-          if (j && typeof j.v === 'number' && j.v > 18) setTimeout(() => { try { location.reload(); } catch (e) {} }, 800);
+          if (j && typeof j.v === 'number' && j.v > 20) {
+            sessionStorage.setItem('lc_ver_reloaded', '1');
+            setTimeout(() => { try { location.reload(); } catch (e) {} }, 800);
+          }
         })
         .catch(() => {});
     } catch (e) {}

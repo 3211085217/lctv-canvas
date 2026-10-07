@@ -19,7 +19,6 @@
     image: [
       { name: 'gpt-image-2', provider: 'openai', modelId: 'tt-image-2', url: 'https://api.lk888.ai/v1', key: 'sk-a43af86bf67a74528de08a6dced865b8bc10da45e4504bea' },
       { name: 'gpt-image-2.5', provider: 'openai', modelId: 'tt-image-2.5', url: 'https://api.lk888.ai/v1', key: 'sk-cbcaa71d27f6f2dcb0fc39f51e86b0b5b6baf0d3db5aeaa8' },
-      { name: 'gpt-image-2.5 官转', provider: 'openai', modelId: 'tt-image-2.5-token', url: 'https://api.lk888.ai/v1', key: 'sk-3b747bf8a4eb827c5938113c790b269bdd1a46ecb7e1bc3c' },
       { name: '纳米香蕉 Pro', provider: 'openai', modelId: 'banana-pro', url: 'https://api.lk888.ai/v1', key: 'sk-522024479adf6612b14fcb1f859b9ce751835e8619d4291c', resolutions: ['1K', '2K', '4K'] },
     ],
     video: [
@@ -42,6 +41,7 @@
     { name: 'h3特价', modelId: 'hailuo-h3-cankaosheng' },
     { name: 'sd 2.5', modelId: 'SEEDANCE_SD_2_5' },
     { name: 'seedance 2.5 XG', modelId: 'lec-xg-sd25-30' },
+    { name: 'gpt-image-2.5 官转', modelId: 'tt-image-2.5-token' },
   ];
   const disabledName = (name) => {
     const nm = String(name || '').trim().toLowerCase();

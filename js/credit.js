@@ -41,6 +41,7 @@
         if (j.prices) this.prices = j.prices;
         if (j.vrates) this.vrates = j.vrates;
       }
+      this._inited = true;
       this.render();
       const btn = U.$('#credit-btn');
       if (btn) btn.onclick = () => this.openRecharge();
@@ -72,19 +73,31 @@
     /* 生成前扣费：后端定价（kind: image/video/audio）。
        视频生成额外传 {duration, model}：命中按秒计费模型时后端按 时长×单价 算价。
        返回 true=可继续生成；false=余额不足（已弹充值窗）。
-       后端不可达时放行（fail-open）：充值系统故障不应卡死整个画布。 */
+       强制口径：余额为 0 直接拦、后端无响应/不可达也一律拦（绝不 fail-open 白嫖）。 */
     async consume(kind, extra) {
       if (!this.device) this.device = this._devId();
+      // 强制：余额已知为 0 直接拦截，不等后端
+      if (this._inited && this.balance <= 0) {
+        LC.App.toast('「积分不足」请先充值后再生成', 'warn');
+        this.openRecharge();
+        return false;
+      }
       try {
         const j = await this._post('/consume', Object.assign({ device: this.device, kind }, extra || {}));
-        if (!j) return true;
+        if (!j) {
+          LC.App.toast('积分服务无响应，本次生成已拦截', 'warn');
+          return false;
+        }
         if (typeof j.credits === 'number') this.balance = j.credits;
         this.render();
         if (j.ok) return true;
         LC.App.toast(`「积分不足」本次生成需 ${j.price} 积分（当前 ${j.credits}）`, 'warn');
         this.openRecharge();
         return false;
-      } catch (e) { return true; }
+      } catch (e) {
+        LC.App.toast('积分服务不可用，本次生成已拦截', 'warn');
+        return false;
+      }
     },
 
     /* 生成失败且未提交到上游时退款（调用方触发；extra 与 consume 一致，后端按实扣金额原路退回） */

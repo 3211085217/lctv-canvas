@@ -20,6 +20,36 @@
     upscale:  { promptProp: '',         modelKind: 'video', modelProp: 'model', noInput: true, upscaleOnly: true },
   };
 
+  /* ============ 云端计费价格徽标（与后端 serve.py 定价表一致，改价必须前后端同步改） ============
+   * viduq3 / MiniMax H3：固定 0.15 积分/秒
+   * seedance 2.0 系列（迷你/快速/标准）：单价 = 基础价 + 0.5 积分/秒，总价 = 单价 × 时长（统一按不含视频口径）
+   * 其余视频模型：平账 2 积分/条（后端原定价，此处只做展示） */
+  const SD20_BASE = {
+    mini: { '480P': 0.1872, '720P': 0.2617, '1080P': 0.4793, '4K': 0.7011 },
+    fast: { '480P': 0.2235, '720P': 0.3917, '1080P': 0.8076, '4K': 1.8631 },
+    std:  { '480P': 0.2964, '720P': 0.4836, '1080P': 1.0316, '4K': 2.6426 },
+  };
+  function cloudVideoFee(node) {
+    const p = (node && node.props) ? node.props : {};
+    const ml = String(p.model || '').toLowerCase();
+    const res = String(p.resolution || '');
+    let perSec = null;
+    if (/viduq3/.test(ml) || /minimax/.test(ml)) perSec = 0.15;
+    else {
+      let tier = null;
+      if (/mini/.test(ml)) tier = 'mini';
+      else if (/fast/.test(ml)) tier = 'fast';
+      else if (/seedance/.test(ml) && (/2\.0/.test(ml) || /2-0/.test(ml))) tier = 'std';
+      if (tier) {
+        const base = (SD20_BASE[tier] || {})[res.toUpperCase()];
+        if (base != null) perSec = Math.round((base + 0.5) * 10000) / 10000;
+      }
+    }
+    if (perSec == null) return null;   // 未命中按秒计费表 → 按条计费
+    const dur = Math.min(120, Math.max(1, Math.round(Number(p.duration) || 5)));
+    return { perSec, dur, total: Math.round(perSec * dur * 100) / 100 };
+  }
+
   const Panel = {
     el: null,
     node: null,   // 当前绑定的节点
@@ -228,6 +258,13 @@
             : `<button class="pp-tag" data-ppact="ref" title="导入本地视频文件（作为成片透传）"><span class="pp-plus">+</span>本地视频</button>`);
 
       // 风格按钮固定显示"风格"，选中后右侧显示风格名
+      // 价格徽标：仅视频节点，写在 ▶ 生成旁边（云端计费，表值与后端 serve.py 定价一致）
+      const feeHtml = n.type !== 'video' ? '' : (() => {
+        const fee = cloudVideoFee(n);
+        return fee
+          ? `<span class="pp-fee" style="margin-right:8px;padding:3px 8px;border-radius:6px;background:rgba(208,184,138,.12);color:#d0b88a;font-size:11px;white-space:nowrap" title="${fee.perSec} 积分/秒 × ${fee.dur} 秒">≈${fee.total} 积分</span>`
+          : `<span class="pp-fee" style="margin-right:8px;padding:3px 8px;border-radius:6px;background:rgba(208,184,138,.12);color:#d0b88a;font-size:11px;white-space:nowrap" title="该视频模型按条计费（后端定价）">2 积分/条</span>`;
+      })();
       this.el.innerHTML = `
         <div class="pp-inner">
           <div class="pp-node-title" title="当前面板绑定的节点（下方 ▶ 只生成这个节点）">${U.icon('target', 12)} ${U.esc(n.title)}</div>
@@ -258,6 +295,7 @@
                 : `<button class="pp-drop pp-drop-sm" data-ppdrop="resolution" title="输出分辨率">${p.resolution || '720P'}<span class="pp-caret">▾</span></button>`}
             </div>
             <div class="pp-bar-right">
+              ${feeHtml}
               <button class="pp-run" data-ppact="run" title="生成">${U.icon('arrow-up', 15)}</button>
             </div>
           </div>
@@ -265,6 +303,21 @@
 
       this.bindEvents(n);
       this.updateRunBtn();
+    },
+
+    /* 价格徽标实时刷新（时长滑块拖动时调用，不整面板重渲染以免打断拖拽） */
+    renderFee(n) {
+      if (!n) return;
+      const box = U.$('.pp-fee', this.el);
+      if (!box) return;
+      const fee = cloudVideoFee(n);
+      if (fee) {
+        box.textContent = '≈' + fee.total + ' 积分';
+        box.title = fee.perSec + ' 积分/秒 × ' + fee.dur + ' 秒';
+      } else {
+        box.textContent = '2 积分/条';
+        box.title = '该视频模型按条计费（后端定价）';
+      }
     },
 
     /* ---------- 分栏式节点（文本/音频/脚本/字幕/视频超清）：简版面板 ---------- */
@@ -599,6 +652,7 @@
         n.props.duration = val;
         const lab = rng.parentElement.querySelector('.pp-dur-val');
         if (lab) lab.textContent = val + 's';
+        this.renderFee(n);   // 时长变化 → 价格徽标实时更新
         LC.App.saveSoon();
         // 同步节点本体显示
         if (LC.App.nodes) LC.App.nodes.updateNode(n.id);

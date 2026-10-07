@@ -29,16 +29,28 @@
       { name: 'seedance 2.0 fast', provider: 'ark', modelId: 'doubao-seedance-2-0-fast-260128', url: 'https://api.lk888.ai/api/v3/anmiao', key: 'sk-15eb8f58fccbbe00c464c2487e712b7a6a263cf48fa7aa02', resolutions: ['480P', '720P'] },
       { name: 'seedance 2.0 mini', provider: 'ark', modelId: 'doubao-seedance-2-0-mini-260615', url: 'https://api.lk888.ai/api/v3/anmiao', key: 'sk-90885a6da70a05728c0f733b416aa8394c2040064f32520b', resolutions: ['480P', '720P'] },
       { name: 'seedance-2.5', provider: 'ark', modelId: 'seedance-2.5-guanfang', url: 'https://api.lk888.ai/v1', key: 'sk-be09115bdbcf6251e3baa8d2c9128c9317b3eb7e0f9cf654', resolutions: ['480P', '720P', '1080P'] },
-      /* 本地新增模型（2026-10）：h3特价参考生 / 22Ai 视频超分 / StarCreate 特价版 */
-      { name: 'h3特价', provider: 'openai', modelId: 'hailuo-h3-cankaosheng', url: 'https://api.lk888.ai/v1', key: 'sk-f6bd693d29ed4a1412d729ca35cbedf7f14eafaa88acd5d7', resolutions: ['768P', '1080P', '2K', '4K'] },
+      /* 22Ai 视频超分 */
       { name: '视频超分', provider: 'openai', modelId: 'video-enhance', url: 'https://api.lk888.ai/v1', key: 'sk-07f92245c54454682c5229af22687bacc228a39cc6237f70' },
-      /* StarCreate AI 特价版（按次计费 35 豆/次）：时长锁 30s、分辨率锁 720p、画幅 6 选 1、参考图≤9 */
-      { name: 'sd 2.5', provider: 'openai', modelId: 'SEEDANCE_SD_2_5', url: 'https://starcreateai.com/api/open/v1', key: 'sk-Op3UeKXxCX0TdQTmGkrTCTsJZAny4qtxiI59jQC5nYcxtGvK', resolutions: ['720P'] },
-      /* paipu.net Seedance 2.5 30（XG）：时长 4~30s 可选、分辨率锁 720p、画幅仅 16:9/9:16、参考图≤30 音频≤10 无视频参考、按次计费 ¥2.5 */
-      { name: 'seedance 2.5 XG', provider: 'openai', modelId: 'lec-xg-sd25-30', url: 'https://api.paipu.net', key: 'sk-wFjhtNHJtDSyZY6kGOF7ExMmgO1zIhwatk8RKJbLEeqgRbja', resolutions: ['720P'] },
       /* xingxiaodu.top Seedance 2.5 渠道1：时长锁 30s、分辨率锁 720p、画幅 6 选 1（16:9/9:16/1:1/4:3/3:4/21:9）、参考图≤30 音频≤10(mp3) 无视频参考、按次计费 */
       { name: 'seedance 2.5 渠道1', provider: 'openai', modelId: 'seedance_2.5_渠道1', url: 'https://xingxiaodu.top', key: 'sk-fAZ6AIZtW2OLUGrOGXe98hQtKAQK6PFzpPLVybptqFgIZr8f', resolutions: ['720P'] },
     ],
+  };
+
+  /* 云端已禁用模型：彻底下线，任意用户（含旧缓存/localStorage 残留）都不得使用。
+   * name 用于节点选中态识别，modelId 用于模型配置识别（双写兜底，防止改名绕过）。 */
+  const DISABLED_MODELS = [
+    { name: 'h3特价', modelId: 'hailuo-h3-cankaosheng' },
+    { name: 'sd 2.5', modelId: 'SEEDANCE_SD_2_5' },
+    { name: 'seedance 2.5 XG', modelId: 'lec-xg-sd25-30' },
+  ];
+  const disabledName = (name) => {
+    const nm = String(name || '').trim().toLowerCase();
+    return DISABLED_MODELS.some((d) => d.name.toLowerCase() === nm);
+  };
+  const disabledModel = (m) => {
+    if (!m || typeof m !== 'object') return false;
+    if (disabledName(m.name)) return true;
+    return DISABLED_MODELS.some((d) => String(m.modelId || '').toLowerCase() === d.modelId.toLowerCase());
   };
 
   /* 字节火山各能力端点（url 只填 base/完整地址，路径由 AI 层拼接） */
@@ -118,8 +130,15 @@
           }
         });
       });
+      // 云端下线模型强制清除：移除旧缓存/localStorage 残留，任意方式不可再用
+      ['imageModels', 'videoModels', 'textModels', 'ttsModels'].forEach((k) => {
+        this.data[k] = (this.data[k] || []).filter((m) => !disabledModel(m));
+      });
       return this.data;
     },
+
+    /* 云端禁用模型判断（供执行引擎硬拦截使用） */
+    isDisabledName(name) { return disabledName(name); },
 
     save() {
       try { localStorage.setItem('lc_settings', JSON.stringify(this.data)); }

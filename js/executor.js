@@ -105,6 +105,14 @@
       const g = LC.App.graph;
       const n = g.getNode(id);
       if (!n || this.running.has(id)) return;
+      // 云端下线模型硬拦截：h3特价 / sd 2.5 / seedance 2.5 XG 已彻底禁用，任何方式都不允许执行
+      if (n.props && n.props.model && LC.Settings && LC.Settings.isDisabledName && LC.Settings.isDisabledName(n.props.model)) {
+        n.state.status = 'error';
+        n.state.error = '该模型已下线，无法使用';
+        if (LC.App.nodes) LC.App.nodes.updateNode(id);
+        if (LC.App.toast) LC.App.toast('模型「' + n.props.model + '」已下线，无法使用', 'err');
+        return;
+      }
       // 积分扣费（云端充值系统）：后端按 kind 定价；余额不足 → 弹充值窗并中止本次生成
       // 视频生成带上 {duration, model}：命中按秒计费模型（viduq3 / MiniMax H3）时按 时长×单价 收费
       const creditKind = { image: 'image', video: 'video', audio: 'audio', upscale: 'video' }[n.type];

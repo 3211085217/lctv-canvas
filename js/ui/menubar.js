@@ -105,6 +105,38 @@
           if (A.edges.selectedEdge) { g.removeEdge(A.edges.selectedEdge); A.saveSoon(); break; }
           if (sel.length) { g.removeNodes(sel); A.edges.refresh(); A.saveSoon(); }
           break;
+        case 'arrange': {
+          const ids = sel.length ? sel : [...g.nodes.keys()];
+          if (ids.length < 2) { LC.App.toast('节点太少，无需排版', 'info'); break; }
+          const list = ids.map((id) => g.getNode(id)).filter(Boolean);
+          const total = list.length;
+          const cols = Math.ceil(Math.sqrt(total));
+          const rows = Math.ceil(total / cols);
+          const colW = new Array(cols).fill(0);
+          const rowH = new Array(rows).fill(0);
+          list.forEach((nd, i) => {
+            const r = Math.floor(i / cols), c = i % cols;
+            if (nd.w > colW[c]) colW[c] = nd.w;
+            const h = g.nodeHeight(nd);
+            if (h > rowH[r]) rowH[r] = h;
+          });
+          let ox = Infinity, oy = Infinity;
+          list.forEach((nd) => { if (nd.x < ox) ox = nd.x; if (nd.y < oy) oy = nd.y; });
+          const gapX = 56, gapY = 56;
+          const colX = [0]; for (let c = 1; c < cols; c++) colX[c] = colX[c - 1] + colW[c - 1] + gapX;
+          const rowY = [0]; for (let r = 1; r < rows; r++) rowY[r] = rowY[r - 1] + rowH[r - 1] + gapY;
+          list.forEach((nd, i) => {
+            const r = Math.floor(i / cols), c = i % cols;
+            nd.x = Math.round(ox + colX[c]);
+            nd.y = Math.round(oy + rowY[r]);
+            A.nodes.position(nd);
+          });
+          A.edges.refresh();
+          g.emit('change');
+          A.saveSoon();
+          LC.App.toast(`已排版 ${total} 个节点为 ${cols}×${rows}`, 'ok');
+          break;
+        }
         case 'n-text': case 'n-image': case 'n-video': case 'n-audio': case 'n-script':
         case 'n-stage': case 'n-subtitle': case 'n-export': case 'n-check':
           A.createNodeNearCenter(act.slice(2)); break;
